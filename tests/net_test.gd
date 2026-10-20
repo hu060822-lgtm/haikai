@@ -20,6 +20,7 @@ func _initialize() -> void:
 func _run() -> void:
 	GameState.save_enabled = false
 	GameState.reset()
+	Run.forced_monsters = ["colossus", "mimic"]
 	_main = load("res://scenes/main.tscn").instantiate()
 	_main.show_menus = false
 	root.add_child(_main)
@@ -81,7 +82,7 @@ func _client() -> void:
 	_check(player.get_multiplayer_authority() == _main.session.local_id(), "client owns its own player")
 	_check(await _wait(func() -> bool: return get_nodes_in_group("loot").size() >= BoilerFactory.LOOT_MIN),
 		"loot replicates to the client (%d)" % get_nodes_in_group("loot").size())
-	_check(_main.colossus != null, "the colossus replicates to the client")
+	_check(await _wait(func() -> bool: return _main.colossus != null), "the colossus replicates to the client")
 	player.global_position = SAFE_SPOT
 	player.velocity = Vector3.ZERO
 	await _frames(30)
@@ -94,6 +95,16 @@ func _client() -> void:
 	_check(player.carried_value == value, "picked item has the right value")
 	_check(await _wait(func() -> bool: return get_nodes_in_group("loot").size() == loot_before - 1),
 		"picked item disappears for the client")
+
+	var mimic: Mimic = null
+	for node in _main.run.monsters_root.get_children():
+		if node is Mimic:
+			mimic = node
+	_check(mimic != null, "mimics replicate to the client")
+	if mimic != null:
+		mimic.interact(player)
+		_check(await _wait(func() -> bool: return player.health < Player.MAX_HEALTH), "a mimic on the host bites the client")
+		_check(await _wait(func() -> bool: return not mimic.disguised), "the bitten mimic's reveal replicates")
 
 	_main.level.lever.interact(player)
 	_check(await _wait(func() -> bool: return _main.level.extraction_zone.powered), "client's lever powers the elevator")

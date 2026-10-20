@@ -1,5 +1,5 @@
 extends SceneTree
-## Headless smoke test for the phase 1 slice.
+## Headless smoke test for the single-player game.
 ## Run: godot --headless --path . --script res://tests/smoke_test.gd
 
 var _failures := 0
@@ -12,11 +12,16 @@ func _initialize() -> void:
 func _run() -> void:
 	GameState.save_enabled = false
 	GameState.reset()
+	Run.forced_monsters = ["colossus"]
 	_test_economy()
+	_test_content()
 	await _test_player_basics()
 	await _test_colossus()
 	await _test_extraction()
 	await _test_death()
+	await _test_mannequin()
+	await _test_moth()
+	await _test_mimic()
 	print("SMOKE TEST %s (%d failures)" % ["PASSED" if _failures == 0 else "FAILED", _failures])
 	quit(1 if _failures > 0 else 0)
 
@@ -33,6 +38,120 @@ func _test_economy() -> void:
 	var payout := LootTable.payout(socks)
 	_check(payout.bonus == 200 and payout.total == 3 + 3 + 35 + 200, "a pair of socks pays the set bonus")
 	GameState.reset()
+
+
+func _test_content() -> void:
+	print("content")
+	var ids := {}
+	for item in LootTable.ITEMS:
+		ids[item.id] = true
+	_check(LootTable.ITEMS.size() == 60 and ids.size() == 60, "60 distinct loot items (%d)" % LootTable.ITEMS.size())
+	var dinos := [LootTable.ITEMS[0], LootTable.ITEMS[0]]
+	for item in LootTable.ITEMS:
+		if item.id == 19:
+			dinos = [item, item, item]
+	_check(LootTable.payout(dinos).bonus == 150, "three plastic dinosaurs pay the set bonus")
+	var card := {}
+	for item in LootTable.ITEMS:
+		if item.id == 91:
+			card = item
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 3
+	var paid := LootTable.payout([card], rng)
+	_check(paid.total >= 1 and paid.items_list[0].value == paid.total, "a scratch card pays its prize ($%d)" % paid.total)
+	var ok := true
+	for seed in 300:
+		rng.seed = seed
+		var kinds := MonsterRoster.pick(rng)
+		var large := 0
+		for kind in kinds:
+			if MonsterRoster.MONSTERS[kind].size == "large":
+				large += 1
+		if kinds.size() < 2 or kinds.size() > 4 or large > 1:
+			ok = false
+	_check(ok, "monster draws have 2 to 4 kinds and at most one large")
+
+
+func _monster(main: Node, script: Script) -> Node:
+	for node in main.run.monsters_root.get_children():
+		if node.get_script() == script:
+			return node
+	return null
+
+
+func _test_mannequin() -> void:
+	print("mannequin")
+	Run.forced_monsters = ["mannequin"]
+	var main = await _new_run()
+	var player: Player = main.player
+	var dummy: Mannequin = _monster(main, Mannequin)
+	_check(dummy != null, "mannequin spawns")
+	player.global_position = Vector3(0, 0.1, 4.5)
+	player.rotation.y = 0.0  # facing -z
+	dummy.global_position = Vector3(0, 0.1, -0.5)
+	await _frames(30)
+	var start := dummy.global_position
+	await _frames(90)
+	_check(dummy.is_watched(), "mannequin knows it's being watched")
+	_check(dummy.global_position.distance_to(start) < 0.2, "a watched mannequin does not move")
+	player.rotation.y = PI  # look away
+	var waited := 0
+	while player.health == Player.MAX_HEALTH and waited < 300:
+		await physics_frame
+		waited += 1
+	_check(player.health < Player.MAX_HEALTH and not player.is_dead, "it rushes you the moment you look away (hp=%.0f)" % player.health)
+	_check(dummy.global_position.distance_to(player.global_position) > 8.0, "then it is somewhere else")
+	await _end_run(main)
+
+
+func _test_moth() -> void:
+	print("moth")
+	Run.forced_monsters = ["moth"]
+	var main = await _new_run()
+	var player: Player = main.player
+	var moths: Array = main.run.monsters_root.get_children().filter(func(node) -> bool: return node is Moth)
+	_check(moths.size() >= 2, "moths spawn (%d)" % moths.size())
+	var moth: Moth = moths[0]
+	for other in moths.slice(1):
+		other.global_position = Vector3(0, 30, -100)
+		other.home = other.global_position
+	player.global_position = Vector3(4.0, 0.1, 15.0)
+	moth.global_position = Vector3(4.0, 2.0, 9.0)
+	player.set_lantern(false)
+	await _frames(120)
+	_check(player.lantern_on == false and moth.global_position.distance_to(player.head_position()) > 3.0,
+		"moth ignores a player with the lantern off")
+	player.set_lantern(true)
+	var waited := 0
+	while player.lantern_on and waited < 400:
+		await physics_frame
+		waited += 1
+	_check(not player.lantern_on, "moth flies at the lantern and puts it out")
+	_check(moth.resting, "then it rests for a while")
+	await _end_run(main)
+
+
+func _test_mimic() -> void:
+	print("mimic")
+	Run.forced_monsters = ["mimic"]
+	var main = await _new_run({"weapon": "crowbar", "boosts": ["adrenaline"]})
+	var player: Player = main.player
+	var mimics: Array = main.run.monsters_root.get_children().filter(func(node) -> bool: return node is Mimic)
+	_check(mimics.size() >= 2, "mimics spawn (%d)" % mimics.size())
+	var mimic: Mimic = mimics[0]
+	_check(mimic.get_prompt(player).begins_with("[E] 撿起"), "a mimic reads like loot: %s" % mimic.get_prompt(player))
+	mimic.interact(player)
+	await _frames(5)
+	_check(player.health < Player.MAX_HEALTH and player.items.is_empty(), "picking up a mimic bites instead")
+	player.use_boost()
+	_check("adrenaline" in player.boosts, "a bitten hand can't use gear")
+	_check(not mimic.disguised, "the mimic drops its disguise and runs")
+	var other: Mimic = mimics[1]
+	other.pry(player)
+	await _frames(5)
+	_check(not is_instance_valid(other), "a crowbar poke kills a mimic")
+	await _end_run(main)
+	Run.forced_monsters = ["colossus"]
 
 
 func _new_run(loadout := {}) -> Node:

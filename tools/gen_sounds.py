@@ -128,10 +128,57 @@ def death():
     return out
 
 
+def creak():
+    """Stiff wooden joint: the mannequin moving while nobody looks."""
+    n = int(RATE * 0.45)
+    out = []
+    phase = 0.0
+    for i in range(n):
+        t = i / RATE
+        f = 95 + 60 * math.sin(2 * math.pi * 3 * t) + rng.uniform(-20, 20)
+        phase += 2 * math.pi * f / RATE
+        pulse = 1.0 if (phase % (2 * math.pi)) < 0.6 else -0.2
+        out.append(pulse * 0.45 * env(i, n, 0.05, 0.4))
+    return lowpass(out, 0.5)
+
+
+def flutter():
+    """Papery wing beats."""
+    n = int(RATE * 0.6)
+    raw = lowpass(noise(n), 0.4)
+    return [r * (0.5 + 0.5 * math.sin(2 * math.pi * 28 * i / RATE)) * 0.6 * env(i, n, 0.05, 0.3) for i, r in enumerate(raw)]
+
+
+def screech():
+    """The moth's scream after it snuffs a lantern."""
+    n = int(RATE * 1.4)
+    out = []
+    for i in range(n):
+        t = i / RATE
+        f = 1400 + 500 * math.sin(2 * math.pi * 9 * t) - 300 * t
+        s = math.sin(2 * math.pi * f * t) * 0.4 + rng.uniform(-1, 1) * 0.35
+        out.append(s * env(i, n, 0.02, 0.3))
+    return out
+
+
+def tick():
+    """A loot item that ticks a little too much like a heart."""
+    n = int(RATE * 0.08)
+    return [math.sin(2 * math.pi * 2600 * i / RATE) * math.exp(-i / (RATE * 0.006)) * 0.5 for i in range(n)]
+
+
+def bite():
+    n = int(RATE * 0.5)
+    crunch = lowpass(noise(n), 0.5)
+    return [c * math.exp(-i / (RATE * 0.06)) * 0.9 + math.sin(2 * math.pi * 140 * i / RATE) * math.exp(-i / (RATE * 0.1)) * 0.5
+            for i, c in enumerate(crunch)]
+
+
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
     for name, fn in [("thump", thump), ("hiss", hiss), ("whistle", whistle), ("step", step),
                      ("pickup", pickup), ("clank", clank), ("tink", tink), ("drone", drone),
-                     ("heartbeat", heartbeat), ("death", death)]:
+                     ("heartbeat", heartbeat), ("death", death), ("creak", creak),
+                     ("flutter", flutter), ("screech", screech), ("tick", tick), ("bite", bite)]:
         write(name, fn())
     print("sounds written to", os.path.abspath(OUT))

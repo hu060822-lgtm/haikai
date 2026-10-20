@@ -12,6 +12,8 @@ const MATCH_TIME := 720.0
 const BODY_SCATTER := 0.6
 
 static var instance: Run
+## Tests pin the monster kinds; empty means a random draw (see MonsterRoster).
+static var forced_monsters: Array = []
 
 var seed := 0
 var roster := {}
@@ -19,6 +21,7 @@ var loadout := {}
 var level: BoilerFactory
 var local_player: Player
 var colossus: BoilerColossus
+var monster_kinds: Array[String] = []
 var time_left := MATCH_TIME
 var finished := false
 var rng := RandomNumberGenerator.new()
@@ -101,9 +104,48 @@ func _host_populate() -> void:
 	for id in roster:
 		_player_spawner.spawn({"id": id, "name": roster[id].name, "index": index})
 		index += 1
-	_monster_spawner.spawn({"type": "colossus", "name": "Colossus", "pos": level.monster_spawn, "seed": rng.randi()})
-	for entry in level.roll_loot():
+	var loot := level.roll_loot()
+	for entry in loot:
 		host_spawn_loot(entry.item, entry.pos, entry.rot, true)
+	_host_spawn_monsters()
+
+
+func _host_spawn_monsters() -> void:
+	monster_kinds.clear()
+	if forced_monsters.is_empty():
+		monster_kinds = MonsterRoster.pick(rng)
+	else:
+		monster_kinds.assign(forced_monsters)
+	var spots := level.roll_loot()
+	var serial := 0
+	for kind in monster_kinds:
+		var count_range: Array = MonsterRoster.MONSTERS[kind].count
+		for i in rng.randi_range(count_range[0], count_range[1]):
+			serial += 1
+			var data := {"type": kind, "name": "%s%d" % [kind.capitalize(), serial], "seed": rng.randi()}
+			match kind:
+				"colossus":
+					data.name = "Colossus"
+					data.pos = level.monster_spawn
+				"mannequin":
+					data.pos = _far_patrol_point()
+				"moth":
+					data.pos = BoilerFactory.PATROL_POINTS[rng.randi_range(0, BoilerFactory.PATROL_POINTS.size() - 1)] + Vector3(0, 3.0, 0)
+				"mimic":
+					var spot: Dictionary = spots[serial % spots.size()]
+					data.pos = spot.pos
+					data.rot = spot.rot
+					data.disguise = LootTable.roll(rng, 0.8)
+			_monster_spawner.spawn(data)
+
+
+## The patrol point farthest from where players start.
+func _far_patrol_point() -> Vector3:
+	var best: Vector3 = BoilerFactory.PATROL_POINTS[0]
+	for point in BoilerFactory.PATROL_POINTS:
+		if point.distance_to(level.player_spawn) > best.distance_to(level.player_spawn):
+			best = point
+	return best + Vector3.UP * 0.1
 
 
 func host_spawn_loot(item: Dictionary, pos: Vector3, rot := 0.0, frozen := true, velocity := Vector3.ZERO) -> LootItem:
@@ -137,14 +179,33 @@ func _spawn_player(data: Dictionary) -> Node:
 
 
 func _spawn_monster(data: Dictionary) -> Node:
-	var monster := BoilerColossus.new()
+	var monster: Node3D
+	match data.type:
+		"mannequin":
+			var mannequin := Mannequin.new()
+			mannequin.patrol_points.assign(BoilerFactory.PATROL_POINTS)
+			mannequin.rng.seed = data.seed
+			monster = mannequin
+		"moth":
+			var moth := Moth.new()
+			moth.home = data.pos
+			moth.rng.seed = data.seed
+			monster = moth
+		"mimic":
+			var mimic := Mimic.new()
+			mimic.disguise = data.disguise
+			mimic.rotation.y = data.rot
+			mimic.rng.seed = data.seed
+			monster = mimic
+		_:
+			var giant := BoilerColossus.new()
+			giant.rng.seed = data.seed
+			giant.patrol_points.assign(BoilerFactory.PATROL_POINTS)
+			colossus = giant
+			giant.ready.connect(func() -> void: colossus_spawned.emit(giant), CONNECT_ONE_SHOT)
+			monster = giant
 	monster.name = data.name
 	monster.position = data.pos
-	monster.rng.seed = data.seed
-	for point in BoilerFactory.PATROL_POINTS:
-		monster.patrol_points.append(point)
-	colossus = monster
-	monster.ready.connect(func() -> void: colossus_spawned.emit(monster), CONNECT_ONE_SHOT)
 	return monster
 
 
@@ -196,6 +257,21 @@ func _drop(data: Dictionary, pos: Vector3, velocity: Vector3) -> void:
 		host_spawn_loot(data, pos, 0.0, false, velocity)
 
 
+## A player poked, picked up or hit a monster; the host decides what happens.
+func request_monster_action(monster: Node, action: String) -> void:
+	_to_host(&"_monster_action", [String(monster.name), action])
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _monster_action(monster_name: String, action: String) -> void:
+	if not _is_host():
+		return
+	var monster := monsters_root.get_node_or_null(monster_name)
+	if monster == null or monster.is_queued_for_deletion() or not monster.has_method("host_action"):
+		return
+	monster.host_action(action, players_root.get_node_or_null(str(_sender())) as Player)
+
+
 @rpc("any_peer", "call_local", "reliable")
 func _pull_lever() -> void:
 	if _is_host() and not level.lever.is_pulled:
@@ -242,12 +318,12 @@ func local_extracted() -> void:
 		return
 	finished = true
 	var taken := local_player.take_all_items()
-	var payout := LootTable.payout(taken)
+	var payout := LootTable.payout(taken, rng)
 	var gear := local_player.remaining_gear()
 	local_player.set_extracted()
 	GameState.record_extraction(payout.total, gear)
 	Session.instance.report_finished()
-	local_finished.emit({"survived": true, "items": taken, "payout": payout, "cause": "", "lost_gear": []})
+	local_finished.emit({"survived": true, "items": payout.items_list, "payout": payout, "cause": "", "lost_gear": []})
 
 
 func _on_local_died(cause: String) -> void:
