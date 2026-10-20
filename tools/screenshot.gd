@@ -32,7 +32,7 @@ func _run() -> void:
 
 	main.session.host(24560)
 	var guest_id := 2
-	main.session.roster[guest_id] = {"name": "阿明"}
+	main.session.roster[guest_id] = {"name": "阿明", "role": "guardian"}
 	main.session.roster_changed.emit()
 	main.show_lobby()
 	for i in 10:
@@ -124,6 +124,28 @@ func _run() -> void:
 	for i in 30:
 		await process_frame
 	_save(out_dir, "loot")
+
+	# The guardian's machine room, over the same run.
+	main.run.field.energy = 70.0
+	main.run.host_set_gate(1, true)
+	main.hud.visible = false
+	var view := GuardianView.new()
+	view.run = main.run
+	view.pixel_scale = main._container.stretch_shrink
+	main.add_child(view)
+	for i in 5:
+		await process_frame
+	view.energy = 70.0
+	view.cooldowns = {"gate": 12.0, "power": 0.0, "monster": 0.0}
+	view.extracted = 140
+	for ping in [[Vector3(-6, 0, 4), 14.0, 0.3], [Vector3(10, 6, -6), 8.0, 1.2], [Vector3(2, 0, 12), 6.0, 0.8]]:
+		view._pings.append({"pos": ping[0], "radius": ping[1], "age": ping[2]})
+	view._select_monster()
+	for i in 10:
+		await process_frame
+	_save(out_dir, "guardian")
+	view.queue_free()
+	main.hud.visible = true
 
 	var result := ResultScreen.new()
 	result.survived = true

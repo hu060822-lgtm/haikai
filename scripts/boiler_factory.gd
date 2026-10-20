@@ -37,6 +37,10 @@ var monster_spawn := Vector3(0.0, 0.1, -6.0)
 var extraction_zone: ExtractionZone
 var lever: BoilerLever
 var lockers: Array[Locker] = []
+var gates: Array[Gate] = []
+## The extraction lift needs the boiler restarted AND the power on (the guardian can cut it).
+var boiler_on := false
+var power_on := true
 var rng := RandomNumberGenerator.new()
 ## Only the host needs the navmesh (monsters run there).
 var build_navigation := true
@@ -44,6 +48,8 @@ var build_navigation := true
 var _nav: NavigationRegion3D
 var _flicker_lights: Array[OmniLight3D] = []
 var _flicker_base: Array[float] = []
+var _all_lights: Array[OmniLight3D] = []
+var _light_energy: Array[float] = []
 var _furnace_light: OmniLight3D
 var _noise := FastNoiseLite.new()
 var _time := 0.0
@@ -63,24 +69,43 @@ func _ready() -> void:
 	_build_props()
 	_build_lights()
 	_build_extraction()
+	_build_gates()
+	for node in find_children("*", "OmniLight3D", true, false):
+		_all_lights.append(node)
+		_light_energy.append(node.light_energy)
 	if build_navigation:
 		_bake_navigation()
 
 
 func _process(delta: float) -> void:
 	_time += delta
+	if not power_on:
+		return
 	for i in _flicker_lights.size():
 		var n := _noise.get_noise_2d(_time * 8.0, float(i) * 50.0)
 		_flicker_lights[i].light_energy = _flicker_base[i] * (0.75 + 0.35 * n)
 
 
 func restart_boiler() -> void:
-	extraction_zone.powered = true
+	boiler_on = true
+	extraction_zone.powered = boiler_on and power_on
 	_flicker_base[0] = 4.0
 	_furnace_light.omni_range = 16.0
 	if multiplayer.is_server():
 		GameNoise.emit(get_tree(), lever.global_position, 200.0, GameNoise.Kind.MACHINE)
 	boiler_restarted.emit()
+
+
+## Blackout or power back. Runs on every peer.
+func set_power(on: bool) -> void:
+	power_on = on
+	extraction_zone.powered = boiler_on and power_on
+	for i in _all_lights.size():
+		var light := _all_lights[i]
+		if not is_instance_valid(light):
+			continue
+		light.light_energy = _light_energy[i] if on else 0.0
+	Sfx.play_3d(self, Vector3(0, 6, 0), "thump" if not on else "hiss", 2.0, 80.0, 0.5 if not on else 1.4)
 
 
 ## Picks this run's loot: [{item, pos, rot}] at shuffled spots.
@@ -253,6 +278,22 @@ func _build_extraction() -> void:
 	extraction_zone = ExtractionZone.new()
 	extraction_zone.position = center + Vector3(0, 1.25, 0)
 	add_child(extraction_zone)
+
+
+func _build_gates() -> void:
+	# Both small-room doors and both ends of the crawl duct.
+	for spec in [
+		[Vector3(-9.5, 1.1, 16.5), Vector3(0.15, 2.2, 1.0)],
+		[Vector3(9.5, 1.1, 18.0), Vector3(0.15, 2.2, 1.0)],
+		[Vector3(-5.0, 0.6, -2.0), Vector3(1.2, 1.1, 0.15)],
+		[Vector3(-5.0, 0.6, 8.0), Vector3(1.2, 1.1, 0.15)],
+	]:
+		var gate := Gate.new()
+		gate.name = "Gate%d" % gates.size()
+		gate.position = spec[0]
+		gate.size = spec[1]
+		add_child(gate)
+		gates.append(gate)
 
 
 func _bake_navigation() -> void:

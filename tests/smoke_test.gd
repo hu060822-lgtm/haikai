@@ -13,6 +13,7 @@ func _run() -> void:
 	GameState.save_enabled = false
 	GameState.reset()
 	Run.forced_monsters = ["colossus"]
+	Run.director_enabled = false
 	_test_economy()
 	_test_content()
 	await _test_player_basics()
@@ -22,6 +23,8 @@ func _run() -> void:
 	await _test_mannequin()
 	await _test_moth()
 	await _test_mimic()
+	await _test_field_control()
+	await _test_director()
 	print("SMOKE TEST %s (%d failures)" % ["PASSED" if _failures == 0 else "FAILED", _failures])
 	quit(1 if _failures > 0 else 0)
 
@@ -152,6 +155,80 @@ func _test_mimic() -> void:
 	_check(not is_instance_valid(other), "a crowbar poke kills a mimic")
 	await _end_run(main)
 	Run.forced_monsters = ["colossus"]
+
+
+func _test_field_control() -> void:
+	print("field control")
+	var main = await _new_run()
+	main.colossus.process_mode = Node.PROCESS_MODE_DISABLED
+	var player: Player = main.player
+	var field: FieldControl = main.run.field
+	var level: BoilerFactory = main.level
+	_check(level.gates.size() == 4, "the factory has 4 gates")
+	var before := field.energy
+	GameNoise.emit(self, player.global_position, 14.0, GameNoise.Kind.FOOTSTEP)
+	_check(field.energy > before, "scavenger noise feeds the guardian's energy")
+	field.energy = 10.0
+	_check(not field.use_gate(0), "no energy, no gate")
+	field.energy = 100.0
+	player.global_position = Vector3(4.0, 0.1, 19.0)
+	_check(field.use_gate(0) and level.gates[0].closed, "a gate can be slammed shut")
+	_check(field.energy == 75.0 and not field.can_use("gate"), "it costs energy and goes on cooldown")
+	await _frames(5)
+	# The tool-room door now blocks the way in.
+	player.global_position = Vector3(-8.0, 0.1, 16.5)
+	player.rotation.y = PI / 2.0  # face -x, into the room
+	Input.action_press("move_forward")
+	await _frames(90)
+	Input.action_release("move_forward")
+	_check(player.global_position.x > -9.4, "a closed gate blocks the doorway (x=%.2f)" % player.global_position.x)
+	field._gate_timers[0] = 0.01
+	await _frames(5)
+	_check(not level.gates[0].closed, "the gate rolls back up after a while")
+	# Can't shut a gate on someone standing in it.
+	field.cooldowns.gate = 0.0
+	player.global_position = Vector3(-9.5, 0.1, 16.5)
+	await _frames(3)
+	_check(not field.use_gate(0), "a gate won't close on a player in the doorway")
+
+	main.level.lever.interact(player)
+	_check(level.extraction_zone.powered, "lever powers the lift")
+	_check(field.use_power() and not level.extraction_zone.powered, "a blackout stops the lift")
+	field._power_timer = 0.01
+	await _frames(5)
+	_check(level.extraction_zone.powered, "power comes back after the blackout")
+
+	field.energy = 100.0
+	var moths_before: int = main.run.monsters_root.get_children().filter(func(n) -> bool: return n is Moth).size()
+	_check(not field.use_monster("moth", player.global_position + Vector3(1, 0, 0)), "can't release a monster on top of someone")
+	_check(field.use_monster("moth", Vector3(0, 0.1, -8.0)), "can release a monster away from players")
+	await _frames(3)
+	var moths_after: int = main.run.monsters_root.get_children().filter(func(n) -> bool: return n is Moth).size()
+	_check(moths_after == moths_before + 1, "the released moth appears")
+	await _end_run(main)
+
+
+func _test_director() -> void:
+	print("director")
+	Run.director_enabled = true
+	var main = await _new_run()
+	Run.director_enabled = false
+	main.colossus.process_mode = Node.PROCESS_MODE_DISABLED
+	var director: Director = main.run.director
+	_check(director != null, "the AI director stands in when nobody is the guardian")
+	var player: Player = main.player
+	var field: FieldControl = main.run.field
+	field.energy = 100.0
+	main.level.lever.interact(player)
+	player.global_position = main.level.extraction_zone.global_position + Vector3(0, -1.2, 4.0)
+	await _frames(3)
+	_check(director.decide() == "power", "the director cuts the power when someone nears the lift")
+	field.energy = 100.0
+	player.global_position = Vector3(-8.0, 0.1, 16.5)
+	await _frames(3)
+	_check(director.decide() == "gate", "the director slams a gate near a scavenger")
+	GameState.reset()
+	await _end_run(main)
 
 
 func _new_run(loadout := {}) -> Node:

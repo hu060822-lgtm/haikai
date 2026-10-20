@@ -87,6 +87,16 @@ static func record_extraction(earned: int, surviving_gear: Array) -> void:
 	save_game()
 
 
+const GUARDIAN_WIN_REWARD := 250
+const GUARDIAN_LOSS_REWARD := 50
+
+
+## The guardian earns money too: a lot for holding the line, a little for showing up.
+static func record_guardian(won: bool) -> void:
+	money += GUARDIAN_WIN_REWARD if won else GUARDIAN_LOSS_REWARD
+	save_game()
+
+
 static func record_death() -> void:
 	deaths += 1
 	# Never leave a broke player stuck with nothing: a free lantern run is always possible,

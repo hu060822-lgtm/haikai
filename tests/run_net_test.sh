@@ -3,13 +3,15 @@
 set -u
 GODOT="${1:-godot}"
 cd "$(dirname "$0")/.."
-"$GODOT" --headless --path . --script res://tests/net_test.gd -- host > /tmp/haikai_net_host.log 2>&1 &
-HOST=$!
-sleep 2
-"$GODOT" --headless --path . --script res://tests/net_test.gd -- client > /tmp/haikai_net_client.log 2>&1
-CLIENT_STATUS=$?
-wait $HOST
-HOST_STATUS=$?
-grep -E "^  (ok|FAIL)|NET TEST|^ERROR" /tmp/haikai_net_host.log | grep -v mesh_get_surface_count
-grep -E "^  (ok|FAIL)|NET TEST|^ERROR" /tmp/haikai_net_client.log | grep -v mesh_get_surface_count
-[ $HOST_STATUS -eq 0 ] && [ $CLIENT_STATUS -eq 0 ]
+FAILED=0
+# Two scenarios: two scavengers, then a guardian host with one scavenger.
+for PREFIX in "" "guardian-"; do
+	"$GODOT" --headless --path . --script res://tests/net_test.gd -- ${PREFIX}host > /tmp/haikai_net_host.log 2>&1 &
+	HOST=$!
+	sleep 2
+	"$GODOT" --headless --path . --script res://tests/net_test.gd -- ${PREFIX}client > /tmp/haikai_net_client.log 2>&1 || FAILED=1
+	wait $HOST || FAILED=1
+	grep -E "^  (ok|FAIL)|NET TEST|^ERROR" /tmp/haikai_net_host.log | grep -v mesh_get_surface_count
+	grep -E "^  (ok|FAIL)|NET TEST|^ERROR" /tmp/haikai_net_client.log | grep -v mesh_get_surface_count
+done
+[ $FAILED -eq 0 ]

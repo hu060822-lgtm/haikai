@@ -11,6 +11,7 @@ const TIMEOUT_FRAMES := 1200
 var _failures := 0
 var _main: Node
 var _ended := false
+var _summary := {}
 
 
 func _initialize() -> void:
@@ -21,16 +22,24 @@ func _run() -> void:
 	GameState.save_enabled = false
 	GameState.reset()
 	Run.forced_monsters = ["colossus", "mimic"]
+	Run.director_enabled = false
 	_main = load("res://scenes/main.tscn").instantiate()
 	_main.show_menus = false
 	root.add_child(_main)
 	await _frames(2)
-	_main.session.run_ended.connect(func() -> void: _ended = true)
+	_main.session.run_ended.connect(func(summary: Dictionary) -> void:
+		_summary = summary
+		_ended = true)
 	var role: String = OS.get_cmdline_user_args()[0] if OS.get_cmdline_user_args().size() > 0 else "host"
-	if role == "host":
-		await _host()
-	else:
-		await _client()
+	match role:
+		"host":
+			await _host()
+		"client":
+			await _client()
+		"guardian-host":
+			await _guardian_host()
+		"guardian-client":
+			await _guardian_client()
 	print("NET TEST %s %s (%d failures)" % [role.to_upper(), "PASSED" if _failures == 0 else "FAILED", _failures])
 	# Let the last reliable messages go out before closing the connection.
 	await _frames(90)
@@ -117,6 +126,59 @@ func _client() -> void:
 	_check(await _wait(func() -> bool: return get_nodes_in_group("loot").size() >= loot_before),
 		"dead client's backpack spills onto the floor")
 	_check(await _wait(func() -> bool: return _ended), "client sees the run end")
+
+
+## The host plays the guardian; one client scavenges.
+func _guardian_host() -> void:
+	print("guardian host")
+	_main.session.local_name = "守墓者"
+	_check(_main.session.host(PORT) == OK, "host opens a room")
+	_check(await _wait(func() -> bool: return _main.session.roster.size() == 2), "client joins the lobby")
+	_main.session.request_role("guardian")
+	_check(_main.session.guardian_id() == 1, "the host takes the guardian role")
+	await _frames(10)
+	_main.session.begin_run()
+	_check(await _wait(func() -> bool: return _main.guardian_view != null and _main.run.all_players().size() == 1),
+		"the guardian gets the machine room and only the scavenger spawns")
+	_check(_main.run.director == null, "no AI director when a person is the guardian")
+	_check(_main.player == null, "the guardian has no body in the factory")
+	var field: FieldControl = _main.run.field
+	field.energy = 100.0
+	_main.run.request_ability("gate", [1])
+	_check(_main.level.gates[1].closed, "the guardian closes a gate")
+	_main.run.request_ability("power")
+	_check(not _main.level.power_on, "the guardian cuts the power")
+	_check(await _wait(func() -> bool: return _main.guardian_view.energy < 50.0), "the guardian's screen shows its energy")
+	var energy_before := field.energy
+	_check(await _wait(func() -> bool: return field.energy > energy_before + 2.0), "the scavenger's noise feeds the guardian")
+	_check(await _wait(func() -> bool: return _ended), "the run ends when the scavenger is done")
+	_check(_summary.get("guardian_won", false), "nothing got out, so the guardian wins")
+	_check(GameState.money == GameState.START_MONEY + GameState.GUARDIAN_WIN_REWARD, "the guardian is paid ($%d)" % GameState.money)
+
+
+func _guardian_client() -> void:
+	print("guardian client")
+	_main.session.local_name = "客人"
+	var joined := false
+	for attempt in 20:
+		if _main.session.join("127.0.0.1", PORT) == OK:
+			if await _wait(func() -> bool: return _main.session.roster.size() == 2, 120):
+				joined = true
+				break
+		await _frames(30)
+	_check(joined, "client connects to the host")
+	_check(await _wait(func() -> bool: return _main.player != null), "the scavenger spawns")
+	_check(_main.session.guardian_id() == 1, "the client knows who the guardian is")
+	_check(_main.run.all_players().size() == 1, "the guardian isn't in the factory")
+	_check(await _wait(func() -> bool: return _main.level.gates[1].closed), "the guardian's gate closes for the scavenger")
+	_check(await _wait(func() -> bool: return not _main.level.power_on), "the blackout reaches the scavenger")
+	for i in 6:
+		GameNoise.emit(self, _main.player.global_position, 14.0, GameNoise.Kind.FOOTSTEP)
+		await _frames(10)
+	await _frames(60)
+	_main.player.die("test")
+	_check(await _wait(func() -> bool: return _ended), "the scavenger sees the run end")
+	_check(_summary.get("guardian_won", false) and _summary.get("guardian", "") == "守墓者", "the result names the winning guardian")
 
 
 func _remote_player() -> Player:
