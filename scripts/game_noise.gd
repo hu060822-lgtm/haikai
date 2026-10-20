@@ -3,7 +3,7 @@ class_name GameNoise
 ## "listeners" group with a hear() method is told about it. Monsters only exist
 ## on the host, so noise made on a client is forwarded there.
 
-enum Kind { FOOTSTEP, LANDING, ITEM, IMPACT, TOOL, MACHINE, VOICE }
+enum Kind { FOOTSTEP, LANDING, ITEM, IMPACT, TOOL, MACHINE, VOICE, MUSIC }
 
 
 static func emit(tree: SceneTree, position: Vector3, radius: float, kind := Kind.FOOTSTEP) -> void:

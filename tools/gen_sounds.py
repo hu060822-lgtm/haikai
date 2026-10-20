@@ -205,12 +205,78 @@ def wind():
     return out[: n - fade]
 
 
+def lullaby():
+    """A music-box lullaby, a little off pitch, looping."""
+    notes = [0, 4, 7, 4, 0, 4, 7, 12, 11, 7, 5, 2, 0, 0]
+    beat = int(RATE * 0.42)
+    out = []
+    for k, semis in enumerate(notes):
+        f = 523.0 * 2 ** (semis / 12) * (0.99 if k % 3 == 0 else 1.0)
+        for i in range(beat):
+            t = i / RATE
+            tone = math.sin(2 * math.pi * f * t) + 0.25 * math.sin(2 * math.pi * f * 3.01 * t)
+            out.append(tone * math.exp(-t / 0.25) * 0.35)
+    return out
+
+
+def cough():
+    """A dry cough from somewhere in the fog."""
+    n = int(RATE * 0.5)
+    base = lowpass(noise(n), 0.35)
+    out = []
+    for i, b in enumerate(base):
+        t = i / RATE
+        burst = math.exp(-t / 0.05) + 0.7 * math.exp(-max(0.0, t - 0.22) / 0.05) * (t > 0.22)
+        out.append(b * burst * 1.2)
+    return out
+
+
+def rumble():
+    """Something huge and long tearing down a corridor, looping."""
+    n = int(RATE * 2.0)
+    base = lowpass(noise(n), 0.03)
+    out = []
+    for i, b in enumerate(base):
+        t = i / RATE
+        clack = 0.5 * math.exp(-((t * 6) % 1.0) / 0.08)
+        out.append(b * 3.0 * (0.7 + clack) + math.sin(2 * math.pi * 38 * t) * 0.25)
+    fade = int(RATE * 0.2)
+    for i in range(fade):
+        k = i / fade
+        out[i] = out[i] * k + out[n - fade + i] * (1 - k)
+    return out[: n - fade]
+
+
+def giggle():
+    """A child's laugh, pitched oddly, from far off."""
+    n = int(RATE * 0.9)
+    out = []
+    for i in range(n):
+        t = i / RATE
+        pulse = max(0.0, math.sin(2 * math.pi * 7 * t)) ** 2
+        f = 700 + 120 * math.sin(2 * math.pi * 3 * t)
+        out.append(math.sin(2 * math.pi * f * t) * pulse * env(i, n, 0.05, 0.4) * 0.45)
+    return out
+
+
+def static():
+    """Radio static with a detuned tuning-fork whine."""
+    n = int(RATE * 0.8)
+    out = []
+    for i, b in enumerate(noise(n)):
+        t = i / RATE
+        out.append((b * 0.3 + math.sin(2 * math.pi * 441.5 * t) * 0.3) * env(i, n, 0.02, 0.3))
+    return out
+
+
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
     for name, fn in [("thump", thump), ("hiss", hiss), ("whistle", whistle), ("step", step),
                      ("pickup", pickup), ("clank", clank), ("tink", tink), ("drone", drone),
                      ("heartbeat", heartbeat), ("death", death), ("creak", creak),
                      ("flutter", flutter), ("screech", screech), ("tick", tick), ("bite", bite),
-                     ("chime", chime), ("wind", wind)]:
+                     ("chime", chime), ("wind", wind),
+                     ("lullaby", lullaby), ("cough", cough), ("rumble", rumble), ("giggle", giggle),
+                     ("static", static)]:
         write(name, fn())
     print("sounds written to", os.path.abspath(OUT))
