@@ -118,7 +118,7 @@ func _think(delta: float) -> void:
 func found_by() -> Player:
 	var chest := global_position + Vector3.UP * 0.6
 	for player in MonsterKit.active_players(get_tree()):
-		if not player.lantern_on:
+		if not player.is_lit():
 			continue
 		var eye := player.head_position()
 		var to := chest - eye

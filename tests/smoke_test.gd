@@ -698,6 +698,8 @@ func _test_maps() -> void:
 				await _test_mall(main, level, player)
 			"station":
 				await _test_station(main, level as ResearchStation, player)
+			"afternoon":
+				await _test_afternoon(main, level as EndlessAfternoon, player)
 		await _end_run(main)
 	Run.forced_map = "factory"
 
@@ -740,6 +742,34 @@ func _test_station(_main: Node, station: ResearchStation, player: Player) -> voi
 	var hp := player.health
 	await _frames(200)
 	_check(player.health < hp, "station: freezing hurts (hp=%d)" % player.health)
+
+
+func _test_afternoon(main: Node, dream: EndlessAfternoon, player: Player) -> void:
+	_check(dream.bright and player.is_lit(), "afternoon: too bright for darkness to hide you")
+	player.global_position = Vector3(16.5, 0.1, 0)
+	player.rotation.y = -PI / 2.0
+	Input.action_press("move_forward")
+	await _frames(60)
+	Input.action_release("move_forward")
+	_check(player.global_position.x < EndlessAfternoon.LOOP_AT, "afternoon: the corridor loops (x=%.1f)" % player.global_position.x)
+	var door: DreamDoor = dream.find_children("*", "DreamDoor", true, false)[0]
+	var before := player.global_position
+	door.interact(player)
+	var first := player.global_position
+	door.interact(player)
+	_check(first.distance_to(before) > 3.0 and player.global_position.distance_to(first) > 1.0, "afternoon: the white door opens onto a different room each time")
+	var start := dream.clarity
+	await _frames(120)
+	_check(dream.clarity < start and dream.status_text().begins_with("清醒度"), "afternoon: clarity drains (%s)" % dream.status_text())
+	dream.clarity = 20.0
+	await _frames(2)
+	_check(player.dream > 0.5, "afternoon: the dream thickens as clarity falls")
+	for id in [1, 2, 3, 4]:
+		player.pickup(LootTable.make(id))
+	dream.clarity = 0.0
+	await _frames(5)
+	_check(main.run.finished and main.last_result.get("survived", false) and main.last_result.items.size() == 2,
+		"afternoon: at zero you're woken up with half your loot (%d items)" % main.last_result.get("items", []).size())
 
 
 func _new_run(loadout := {}) -> Node:

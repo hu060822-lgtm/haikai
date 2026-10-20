@@ -649,6 +649,11 @@ func take_all_items() -> Array[Dictionary]:
 	return taken
 
 
+## Whether monsters see this player as lit: lantern on, or on a map with no shadows.
+func is_lit() -> bool:
+	return lantern_on or (Run.instance != null and Run.instance.level != null and Run.instance.level.bright)
+
+
 func set_lantern(on: bool) -> void:
 	lantern_on = on
 

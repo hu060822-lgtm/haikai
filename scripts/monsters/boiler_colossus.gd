@@ -295,8 +295,8 @@ func _can_sense(player: Player) -> bool:
 	var distance := to_player.length()
 	if distance < NEAR_SENSE and absf(to_player.y) < KILL_HEIGHT:
 		return true
-	var sight := SIGHT_RANGE_LIT if player.lantern_on else SIGHT_RANGE_DARK
-	if player.is_crouching and not player.lantern_on:
+	var sight := SIGHT_RANGE_LIT if player.is_lit() else SIGHT_RANGE_DARK
+	if player.is_crouching and not player.is_lit():
 		sight *= 0.6
 	if distance > sight:
 		return false
