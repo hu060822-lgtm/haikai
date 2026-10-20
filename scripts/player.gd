@@ -37,6 +37,7 @@ const NOISY_ITEM_INTERVAL := 1.6
 const ADRENALINE_TIME := 10.0
 const ADRENALINE_CRASH_TIME := 10.0
 const SPRING_JUMP_MULT := 1.42  # sqrt(2): double jump height
+const VOICE_RATE := 11025.0
 
 var items: Array[Dictionary] = []
 var carried_weight := 0.0
@@ -45,7 +46,19 @@ var health := MAX_HEALTH
 var stamina := 1.0
 var is_crouching := false
 var is_dead := false
-var lantern_on := true
+var extracted := false:
+	set(value):
+		extracted = value
+		if value:
+			visible = false
+			collision_layer = 0
+var lantern_on := true:
+	set(value):
+		lantern_on = value
+		if _lantern != null:
+			_lantern.visible = value
+			_lantern_glow.visible = value
+var display_name := "拾荒者"
 var input_enabled := true
 var weapon_id := ""
 var weapon_ammo := 0
@@ -62,6 +75,10 @@ var _shape: CapsuleShape3D
 var _collider: CollisionShape3D
 var _ceiling_check: ShapeCast3D
 var _focused: Node = null
+var _body: Node3D
+var _remote_last_pos := Vector3.ZERO
+var _name_label: Label3D
+var _voice_playback: AudioStreamGeneratorPlayback
 var _bob_time := 0.0
 var _step_timer := 0.0
 var _noisy_timer := 0.0
@@ -87,6 +104,7 @@ func _ready() -> void:
 	add_child(_collider)
 
 	_head = Node3D.new()
+	_head.name = "Head"
 	_head.position.y = STAND_HEIGHT - EYE_OFFSET
 	add_child(_head)
 
@@ -94,7 +112,6 @@ func _ready() -> void:
 	_camera.fov = 70.0
 	_camera.near = 0.05
 	_camera.far = 60.0
-	_camera.current = true
 	_head.add_child(_camera)
 
 	_lantern = SpotLight3D.new()
@@ -127,6 +144,160 @@ func _ready() -> void:
 	_ceiling_check.collision_mask = Layers.WORLD | Layers.WALKWAY
 	_ceiling_check.add_exception(self)
 	add_child(_ceiling_check)
+
+	_build_body()
+	if get_node_or_null("Sync") == null:
+		build_sync()
+	lantern_on = lantern_on
+	# Children created above default to the host; hand them to this player's owner.
+	# The synchronizer already has it (changing it after it registered breaks replication).
+	for child in get_children():
+		if child.name != "Sync":
+			child.set_multiplayer_authority(get_multiplayer_authority(), true)
+	var local := is_multiplayer_authority()
+	_camera.current = local
+	_body.visible = not local
+	_name_label.text = display_name
+	set_physics_process(local)
+	if not local:
+		_build_voice()
+
+
+## Where a teammate's voice comes out: their mouth, fading with distance.
+func _build_voice() -> void:
+	var voice := AudioStreamPlayer3D.new()
+	voice.name = "Voice"
+	var generator := AudioStreamGenerator.new()
+	generator.mix_rate = VOICE_RATE
+	generator.buffer_length = 0.4
+	voice.stream = generator
+	voice.position.y = STAND_HEIGHT - 0.2
+	voice.unit_size = 5.0
+	voice.max_distance = 28.0
+	voice.volume_db = 2.0
+	add_child(voice)
+	voice.play()
+	_voice_playback = voice.get_stream_playback()
+
+
+## Local player: send a chunk of 8-bit mic audio to everyone else.
+func send_voice(data: PackedByteArray) -> void:
+	_voice_packet.rpc(data)
+
+
+@rpc("authority", "call_remote", "unreliable_ordered")
+func _voice_packet(data: PackedByteArray) -> void:
+	# The dead don't talk to the living.
+	if _voice_playback == null or is_dead:
+		return
+	if _voice_playback.get_frames_available() < data.size():
+		return
+	var frames := PackedVector2Array()
+	frames.resize(data.size())
+	for i in data.size():
+		var value := (data[i] - 128) / 127.0
+		frames[i] = Vector2(value, value)
+	_voice_playback.push_buffer(frames)
+
+
+## Movement and look are owned by the player's own machine and replicated to others.
+## The spawner calls this before the player enters the tree, after setting its authority.
+func build_sync() -> void:
+	var sync := MultiplayerSynchronizer.new()
+	sync.name = "Sync"
+	var config := SceneReplicationConfig.new()
+	for path in [".:position", ".:rotation", "Head:rotation", ".:is_crouching", ".:lantern_on",
+			".:is_dead", ".:extracted", ".:display_name"]:
+		var node_path := NodePath(path)
+		config.add_property(node_path)
+		# Child nodes don't exist yet when spawn state is applied; sync them afterwards only.
+		config.property_set_spawn(node_path, not path.begins_with("Head"))
+		config.property_set_replication_mode(node_path, SceneReplicationConfig.REPLICATION_MODE_ALWAYS)
+	sync.replication_config = config
+	sync.set_multiplayer_authority(get_multiplayer_authority())
+	add_child(sync)
+
+
+## What other players see: a hunched scavenger in a long coat, with a name tag.
+func _build_body() -> void:
+	_body = Node3D.new()
+	_body.name = "Body"
+	add_child(_body)
+	var coat := PS1Materials.get_material("concrete", Color(0.45, 0.38, 0.3), true)
+	var skin := PS1Materials.get_material("concrete", Color(0.85, 0.72, 0.6), true)
+	var leather := PS1Materials.get_material("rust_metal", Color(0.5, 0.4, 0.3), true)
+	for part in [
+		[Vector3(0.5, 0.95, 0.32), Vector3(0, 0.95, 0), coat],
+		[Vector3(0.28, 0.3, 0.28), Vector3(0, 1.58, 0), skin],
+		[Vector3(0.34, 0.08, 0.34), Vector3(0, 1.75, 0), leather],
+		[Vector3(0.16, 0.5, 0.16), Vector3(-0.13, 0.25, 0), leather],
+		[Vector3(0.16, 0.5, 0.16), Vector3(0.13, 0.25, 0), leather],
+		[Vector3(0.42, 0.5, 0.22), Vector3(0, 1.05, 0.25), leather],
+	]:
+		var mesh_instance := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		box.size = part[0]
+		mesh_instance.mesh = box
+		mesh_instance.position = part[1]
+		mesh_instance.material_override = part[2]
+		_body.add_child(mesh_instance)
+	_name_label = Label3D.new()
+	_name_label.position.y = 2.05
+	_name_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_name_label.no_depth_test = true
+	_name_label.font_size = 48
+	_name_label.pixel_size = 0.004
+	_name_label.modulate = Color(0.95, 0.88, 0.7, 0.85)
+	_name_label.outline_size = 8
+	_body.add_child(_name_label)
+
+
+func is_active() -> bool:
+	return not is_dead and not extracted
+
+
+## Called on the local player after a successful extraction.
+func set_extracted() -> void:
+	input_enabled = false
+	extracted = true
+
+
+## Spectating: look through this (remote) player's eyes after your own run ended.
+func set_viewed(viewed: bool) -> void:
+	_camera.current = viewed
+	_body.visible = not viewed and not is_multiplayer_authority()
+
+
+func can_carry(data: Dictionary) -> bool:
+	return carried_weight + data.weight <= MAX_CARRY_WEIGHT
+
+
+## The host tells the owner they were caught by something.
+@rpc("any_peer", "call_local", "reliable")
+func remote_die(cause: String) -> void:
+	var sender := multiplayer.get_remote_sender_id()
+	if sender != 0 and sender != 1:
+		return
+	die(cause)
+
+
+func _process(delta: float) -> void:
+	if is_multiplayer_authority():
+		return
+	# Remote players: pose the body from replicated state.
+	_body.scale.y = lerpf(_body.scale.y, 0.6 if is_crouching else 1.0, 10.0 * delta)
+	_body.rotation.x = lerpf(_body.rotation.x, -PI / 2.0 if is_dead else 0.0, 4.0 * delta)
+	_name_label.text = display_name
+	# Footsteps of teammates, inferred from how fast their replicated position moves.
+	var moved := Vector2(position.x - _remote_last_pos.x, position.z - _remote_last_pos.z).length()
+	_remote_last_pos = position
+	var speed := moved / maxf(delta, 0.001)
+	if speed > 0.5 and speed < 12.0 and not is_dead:
+		_step_timer -= delta
+		if _step_timer <= 0.0:
+			_step_timer = 0.32 if speed > 4.5 else (0.7 if is_crouching else 0.48)
+			var volume := -22.0 if is_crouching else (-8.0 if speed > 4.5 else -14.0)
+			Sfx.play_3d(get_parent(), global_position, "step", volume, 20.0, randf_range(0.85, 1.15))
 
 
 ## Equips carry-in gear for this run. loadout = {"weapon": id, "boosts": [ids]}.
@@ -269,7 +440,7 @@ func _physics_process(delta: float) -> void:
 
 
 func pickup(data: Dictionary) -> bool:
-	if carried_weight + data.weight > MAX_CARRY_WEIGHT:
+	if not can_carry(data):
 		message.emit("太重了，背不動")
 		return false
 	items.append(data)
@@ -282,10 +453,15 @@ func drop_last() -> void:
 		return
 	var data: Dictionary = items.pop_back()
 	_recalculate()
-	var item := LootItem.from_data(data)
-	get_parent().add_child(item)
-	item.global_position = _camera.global_position - _camera.global_basis.z * 0.8
-	item.linear_velocity = -_camera.global_basis.z * 2.0
+	var at := _camera.global_position - _camera.global_basis.z * 0.8
+	var velocity_out := -_camera.global_basis.z * 2.0
+	if Run.instance != null:
+		Run.instance.request_drop(data, at, velocity_out)
+	else:
+		var item := LootItem.from_data(data)
+		get_parent().add_child(item)
+		item.global_position = at
+		item.linear_velocity = velocity_out
 
 
 ## Empties the backpack and returns what was in it (used by extraction).
@@ -298,8 +474,6 @@ func take_all_items() -> Array[Dictionary]:
 
 func set_lantern(on: bool) -> void:
 	lantern_on = on
-	_lantern.visible = on
-	_lantern_glow.visible = on
 
 
 func use_weapon() -> void:

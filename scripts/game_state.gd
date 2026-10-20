@@ -10,6 +10,8 @@ static var stash := {}  # gear id -> count owned but not equipped
 static var extractions := 0
 static var deaths := 0
 static var best_haul := 0
+## Gear picked in the stash screen for the next run (already paid for).
+static var equipped := {"weapon": "", "boosts": []}
 ## Tests turn this off so they never touch the player's real save.
 static var save_enabled := true
 
@@ -27,6 +29,11 @@ static func load_game() -> void:
 	extractions = int(parsed.get("extractions", 0))
 	deaths = int(parsed.get("deaths", 0))
 	best_haul = int(parsed.get("best_haul", 0))
+	var saved_loadout = parsed.get("equipped", {})
+	if typeof(saved_loadout) == TYPE_DICTIONARY:
+		equipped = {"weapon": str(saved_loadout.get("weapon", "")), "boosts": []}
+		for id in saved_loadout.get("boosts", []):
+			equipped.boosts.append(str(id))
 
 
 static func save_game() -> void:
@@ -37,7 +44,7 @@ static func save_game() -> void:
 		return
 	file.store_string(JSON.stringify({
 		"money": money, "stash": stash, "extractions": extractions,
-		"deaths": deaths, "best_haul": best_haul,
+		"deaths": deaths, "best_haul": best_haul, "equipped": equipped,
 	}))
 
 
@@ -47,6 +54,7 @@ static func reset() -> void:
 	extractions = 0
 	deaths = 0
 	best_haul = 0
+	equipped = {"weapon": "", "boosts": []}
 
 
 static func owned(id: String) -> int:
@@ -86,3 +94,11 @@ static func record_death() -> void:
 	if money < 40:
 		money = 40
 	save_game()
+
+
+## Hands the equipped gear to a starting run; it is no longer in the stash screen.
+static func consume_equipped() -> Dictionary:
+	var loadout := equipped.duplicate(true)
+	equipped = {"weapon": "", "boosts": []}
+	save_game()
+	return loadout

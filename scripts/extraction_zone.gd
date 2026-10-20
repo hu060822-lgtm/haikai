@@ -1,6 +1,7 @@
 class_name ExtractionZone
 extends Area3D
 ## Stand inside for hold_time seconds to extract. Leaving resets the countdown.
+## Every player extracts on their own; the others can keep looting.
 ## Does nothing until powered (the boiler lever).
 
 signal progress_changed(ratio: float)
@@ -55,7 +56,8 @@ func _physics_process(delta: float) -> void:
 
 
 func _on_body_entered(body: Node3D) -> void:
-	if body is Player:
+	# Each machine only extracts its own player.
+	if body is Player and body.is_multiplayer_authority():
 		_player = body
 		if not powered:
 			blocked.emit()

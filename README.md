@@ -23,9 +23,25 @@ PS1 畫風的蒸氣龐克恐怖搜打撤遊戲（計畫代號 sodache）。引�
 | F | 開關提燈 |
 | 左鍵 | 使用武器（撬棍 / 彈弓） |
 | Q | 使用強化道具（腎上腺素針） |
+| M | 麥克風開 / 靜音（多人時） |
+| 左鍵（自己出局後） | 切換觀看的隊友 |
 | Esc | 放開滑鼠（點畫面再抓回來） |
 
-## 一局怎麼玩（階段 1）
+## 多人連線（階段 2，最多 4 人）
+
+1. 一個人當主機：在倉庫畫面按「**建立房間**」。
+2. 其他人在「加入房間」左邊的框輸入主機的 IP，按「**加入房間**」。
+   - 同一個 Wi-Fi / 區網：用主機電腦的區網 IP（例如 `192.168.x.x`）。
+   - 不同地方：主機要在路由器開 **UDP 24500** 埠轉發，再給朋友外網 IP；或用 Radmin VPN / ZeroTier / Tailscale 這類虛擬區網軟體，用它給的 IP。
+3. 人到齊後主機按「開始」，全員一起進場。
+
+- 每個人帶自己倉庫的道具進場，撤離時各自結算自己背包的東西。
+- 物品是共用的：誰先撿到就是誰的。隊友死掉時背包會散落在地上，可以幫他撿回來。
+- 任何人拉下鍋爐拉桿，全隊的升降梯都會通電，巨像也會為所有人醒過來。
+- **近距離語音**：麥克風會自動開，只有附近的隊友聽得到你，而且**附近的怪物也聽得到**。按 M 靜音。死掉的人說話活人聽不到。
+- 自己撤離或死掉後可以看隊友的視角，點左鍵切換；所有人都結束後一起看結算，回到房間可以再開一局。
+
+## 一局怎麼玩
 
 1. **倉庫**：用錢買要帶進場的道具（撬棍、彈弓、腎上腺素針、彈簧鞋）。死掉會全部失去，活著撤離就能帶回來。
 2. **搜刮**：黑暗鍋爐工廠裡每局隨機放 14 到 18 件物品（從 30 種裡抽）。上鎖的櫃子要用撬棍撬開，裡面東西比較好。背越重走越慢。
@@ -43,7 +59,10 @@ PS1 畫風的蒸氣龐克恐怖搜打撤遊戲（計畫代號 sodache）。引�
 
 ```
 scenes/main.tscn            進入點
-scripts/main.gd             低解析 SubViewport、後製、HUD 組裝
+scripts/main.gd             選單流程、低解析 SubViewport、後製、HUD、觀戰
+scripts/net/session.gd      連線（主機 / 加入 / 房間名單 / 開局與結束）
+scripts/net/run.gd          一局的共用世界：生成玩家、怪物、物品，處理撿取與互動請求
+scripts/net/voice_chat.gd   近距離語音
 scripts/player.gd           第一人稱玩家（移動、蹲、體力、背包）
 scripts/boiler_factory.gd   鍋爐工廠場景（用程式碼生成，含導航網格）
 scripts/monsters/           怪物（boiler_colossus.gd = 鍋爐巨像）
@@ -56,13 +75,17 @@ shaders/ps1.gdshader        PS1 表面著色器
 shaders/ps1_post.gdshader   全畫面後製
 textures/                   由 tools/gen_textures.py 產生的 64×64 貼圖
 sounds/                     由 tools/gen_sounds.py 合成的低取樣率音效
-tests/smoke_test.gd         自動測試
+tests/smoke_test.gd         單人自動測試
+tests/net_test.gd           兩個程式互連的多人測試（用 tests/run_net_test.sh 跑）
 ```
 
 ## 測試
 
 ```
 godot --headless --path . --script res://tests/smoke_test.gd
+tests/run_net_test.sh godot
 ```
+
+想在同一台電腦試多人：開兩個遊戲視窗（Godot 編輯器「除錯 → 執行多個實例」選 2），一個建立房間，另一個用 `127.0.0.1` 加入。
 
 設計文件在專案資料夾的 `design/` 裡。

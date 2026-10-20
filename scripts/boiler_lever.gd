@@ -3,7 +3,8 @@ extends StaticBody3D
 ## The main boiler's restart lever. Pulling it powers the extraction elevator,
 ## and wakes the whole factory up.
 
-signal pulled(position: Vector3)
+## The run decides whether the pull happens (the host owns it), then calls play_pull().
+signal interact_requested()
 
 var is_pulled := false
 var _handle: Node3D
@@ -52,6 +53,11 @@ func get_prompt(_player: Player = null) -> String:
 
 
 func interact(_player: Player) -> void:
+	if not is_pulled:
+		interact_requested.emit()
+
+
+func play_pull() -> void:
 	if is_pulled:
 		return
 	is_pulled = true
@@ -59,4 +65,3 @@ func interact(_player: Player) -> void:
 	tween.tween_property(_handle, "rotation:x", deg_to_rad(40.0), 0.5)
 	Sfx.play_3d(get_parent(), global_position, "clank", 6.0, 80.0, 0.6)
 	Sfx.play_3d(get_parent(), global_position, "whistle", 6.0, 120.0, 0.7)
-	pulled.emit(global_position)

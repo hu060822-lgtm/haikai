@@ -16,6 +16,7 @@ var _extract: ProgressBar
 var _extract_label: Label
 var _message: Label
 var _help: Label
+var _voice: Label
 var _vignette: ColorRect
 var _message_timer := 0.0
 var _player: Player
@@ -53,6 +54,10 @@ func _ready() -> void:
 	_help.position.y -= 30.0
 	_help.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_help.modulate.a = 0.5
+
+	_voice = _label("", 16, Control.PRESET_BOTTOM_LEFT)
+	_voice.position += Vector2(24.0, -150.0)
+	_voice.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 
 	_health = _bar(Control.PRESET_BOTTOM_LEFT, Color(0.8, 0.25, 0.2))
 	_health.position += Vector2(24.0, -64.0)
@@ -95,6 +100,22 @@ func set_time_left(seconds: float) -> void:
 	var s := maxi(int(ceil(seconds)), 0)
 	_timer.text = "%d:%02d" % [s / 60, s % 60]
 	_timer.add_theme_color_override("font_color", Color(1.0, 0.35, 0.3) if seconds < 120.0 else TEXT_COLOR)
+
+
+## Mic indicator for online runs. state: "" (hidden), "on", "speaking" or "muted".
+func set_voice(state: String) -> void:
+	match state:
+		"speaking":
+			_voice.text = "● 說話中（M 靜音）"
+			_voice.add_theme_color_override("font_color", Color(0.55, 0.95, 0.6))
+		"muted":
+			_voice.text = "麥克風靜音（M 打開）"
+			_voice.add_theme_color_override("font_color", Color(1.0, 0.45, 0.4))
+		"on":
+			_voice.text = "麥克風開（附近的人和怪物都聽得到）"
+			_voice.add_theme_color_override("font_color", TEXT_COLOR)
+		_:
+			_voice.text = ""
 
 
 func set_objective(text: String) -> void:

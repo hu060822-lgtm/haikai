@@ -13,6 +13,7 @@ const BINDINGS := {
 	"lantern": [KEY_F],
 	"drop": [KEY_G],
 	"use_boost": [KEY_Q],
+	"toggle_mic": [KEY_M],
 }
 
 const MOUSE_BINDINGS := {

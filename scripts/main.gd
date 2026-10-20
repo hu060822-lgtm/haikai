@@ -1,53 +1,116 @@
 extends Node
-## Root of the game: loadout screen -> run -> result screen -> loadout screen.
+## Root of the game: stash -> (lobby) -> run -> result -> stash or lobby.
 ## A run renders the 3D world into a low-res SubViewport (PS1 look), layers the
 ## post effect on it, and draws the HUD at full resolution on top.
+## The world always lives at Main/RunView/Viewport/World so every peer's nodes line up.
 
 const LOW_RES_HEIGHT := 240
 const POST_SHADER := preload("res://shaders/ps1_post.gdshader")
-const MATCH_TIME := 720.0
 const WARNING_TIME := 120.0
 
 ## Tests start runs directly and skip the menus.
 var show_menus := true
-var player: Player
-var level: BoilerFactory
-var colossus: BoilerColossus
+var session: Session
+var run: Run
 var hud: HUD
-var time_left := 0.0
 var run_active := false
 var last_result := {}
+
+var player: Player:
+	get: return run.local_player if run != null else null
+var level: BoilerFactory:
+	get: return run.level if run != null else null
+var colossus: BoilerColossus:
+	get: return run.colossus if run != null else null
+var time_left: float:
+	get: return run.time_left if run != null else 0.0
+	set(value):
+		if run != null:
+			run.time_left = value
 
 var _container: SubViewportContainer
 var _viewport: SubViewport
 var _menu: Control
-var _loadout := {}
+var _pending_loadout = null
 var _warned := false
+var _spectating: Player = null
+var _spectate_label: Label
+var _voice: VoiceChat
 
 
 func _ready() -> void:
 	InputSetup.ensure()
 	GameState.load_game()
+	session = Session.new()
+	session.name = "Session"
+	add_child(session)
+	session.run_requested.connect(_on_run_requested)
+	session.run_ended.connect(_on_run_ended)
+	session.connection_failed.connect(func(reason: String) -> void: show_loadout(reason))
+	session.disconnected.connect(func(reason: String) -> void: show_loadout(reason))
 	get_viewport().size_changed.connect(_update_resolution)
 	if show_menus:
 		show_loadout()
 
 
-func show_loadout() -> void:
+# --- Menus ----------------------------------------------------------------------------
+
+func show_loadout(status := "") -> void:
 	_clear_run()
+	if session.is_online():
+		session.leave()
 	var screen := LoadoutScreen.new()
-	screen.start_requested.connect(start_run)
+	screen.solo_requested.connect(func() -> void: start_run(GameState.consume_equipped()))
+	screen.host_requested.connect(_host)
+	screen.join_requested.connect(_join)
+	_set_menu(screen)
+	if status != "":
+		screen.show_status(status)
+
+
+func show_lobby() -> void:
+	_clear_run()
+	var screen := LobbyScreen.new()
+	screen.start_requested.connect(session.begin_run)
+	screen.leave_requested.connect(func() -> void: show_loadout())
 	_set_menu(screen)
 
 
+func _host() -> void:
+	var err := session.host()
+	if err != OK:
+		(_menu as LoadoutScreen).show_status("開不了房間（埠 %d 被占用？）" % Session.PORT)
+		return
+	show_lobby()
+
+
+func _join(address: String) -> void:
+	if address == "":
+		(_menu as LoadoutScreen).show_status("先輸入主機的 IP")
+		return
+	var err := session.join(address)
+	if err != OK:
+		(_menu as LoadoutScreen).show_status("連不上 %s" % address)
+		return
+	show_lobby()
+
+
+## Single player: an offline session with just you in it.
 func start_run(loadout: Dictionary) -> void:
+	_pending_loadout = loadout
+	session.start_offline()
+	session.begin_run()
+
+
+# --- Run ------------------------------------------------------------------------------
+
+func _on_run_requested(seed: int, roster: Dictionary) -> void:
 	_set_menu(null)
 	_clear_run()
-	_loadout = loadout
 	_warned = false
-	time_left = MATCH_TIME
 
 	_container = SubViewportContainer.new()
+	_container.name = "RunView"
 	_container.stretch = true
 	_container.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -55,31 +118,32 @@ func start_run(loadout: Dictionary) -> void:
 	_container.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	_viewport = SubViewport.new()
+	_viewport.name = "Viewport"
 	_viewport.msaa_3d = Viewport.MSAA_DISABLED
 	_viewport.audio_listener_enable_3d = true
 	_container.add_child(_viewport)
 	_update_resolution()
 
-	level = BoilerFactory.new()
-	_viewport.add_child(level)
+	hud = HUD.new()
+	add_child(hud)
 
-	player = Player.new()
-	_viewport.add_child(player)
-	player.global_position = level.player_spawn
-	player.rotation.y = level.player_spawn_yaw
-	player.equip(loadout)
-	player.died.connect(_on_player_died)
+	run = Run.new()
+	run.name = "World"
+	run.seed = seed
+	run.roster = roster
+	run.loadout = _pending_loadout if _pending_loadout != null else GameState.consume_equipped()
+	_pending_loadout = null
+	run.local_player_spawned.connect(_on_local_player_spawned)
+	run.local_finished.connect(_on_local_finished)
+	_viewport.add_child(run)
 
-	colossus = BoilerColossus.new()
-	colossus.rng.seed = level.rng.randi()
-	for point in BoilerFactory.PATROL_POINTS:
-		colossus.patrol_points.append(point)
-	_viewport.add_child(colossus)
-	colossus.global_position = level.monster_spawn
-	level.boiler_restarted.connect(func() -> void:
-		colossus.enrage(level.lever.global_position)
+	run.level.boiler_restarted.connect(func() -> void:
 		hud.show_message("主鍋爐重啟了。升降梯有電了…整座工廠也醒了。", 5.0)
 		hud.set_objective("到升降梯撤離"))
+	var zone := run.level.extraction_zone
+	zone.progress_changed.connect(hud.set_extract_progress)
+	zone.extracted.connect(func(_who: Player) -> void: run.local_extracted())
+	zone.blocked.connect(func() -> void: hud.show_message("升降梯沒電。先去重啟主鍋爐。"))
 
 	var post_layer := CanvasLayer.new()
 	var post_rect := ColorRect.new()
@@ -91,48 +155,142 @@ func start_run(loadout: Dictionary) -> void:
 	_viewport.add_child(post_layer)
 	post_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
-	hud = HUD.new()
-	add_child(hud)
-	hud.bind_player(player)
-	hud.show_message("找值錢的東西。升降梯要先重啟主鍋爐才會動。", 6.0)
 	hud.set_objective("重啟主鍋爐（北邊）")
-	level.extraction_zone.progress_changed.connect(hud.set_extract_progress)
-	level.extraction_zone.extracted.connect(_on_extracted)
-	level.extraction_zone.blocked.connect(func() -> void: hud.show_message("升降梯沒電。先去重啟主鍋爐。"))
-
 	run_active = true
 	_capture_mouse(true)
 
 
-func _process(delta: float) -> void:
-	if not run_active:
+func _on_local_player_spawned(local: Player) -> void:
+	hud.bind_player(local)
+	var others := run.roster.size() - 1
+	var intro := "找值錢的東西。升降梯要先重啟主鍋爐才會動。"
+	if others > 0:
+		intro = "這次有 %d 個隊友。%s" % [others, intro]
+	hud.show_message(intro, 6.0)
+	if session.is_online() and DisplayServer.get_name() != "headless":
+		_voice = VoiceChat.new()
+		_voice.player = local
+		_voice.speaking_changed.connect(func(_speaking: bool) -> void: _refresh_voice())
+		run.add_child(_voice)
+		_refresh_voice()
+
+
+func _refresh_voice() -> void:
+	if hud == null:
 		return
-	time_left -= delta
-	hud.set_time_left(time_left)
-	if not _warned and time_left <= WARNING_TIME:
+	if _voice == null or not is_instance_valid(_voice) or not run_active:
+		hud.set_voice("")
+	elif VoiceChat.muted:
+		hud.set_voice("muted")
+	else:
+		hud.set_voice("speaking" if _voice.speaking else "on")
+
+
+func _process(_delta: float) -> void:
+	if run == null:
+		return
+	hud.set_time_left(run.time_left)
+	if run_active and not _warned and run.time_left <= WARNING_TIME:
 		_warned = true
 		hud.show_message("鍋爐壓力過高！兩分鐘後爆炸！", 5.0)
-	if time_left <= 0.0:
-		player.die("鍋爐爆炸了，你沒來得及出去")
-
-
-func _input(event: InputEvent) -> void:
-	if not run_active:
-		return
-	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		player.look(event.relative)
-	elif event.is_action_pressed("ui_cancel"):
-		_capture_mouse(false)
-	elif event is InputEventMouseButton and event.pressed and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
-		_capture_mouse(true)
-		get_viewport().set_input_as_handled()
+	if _spectating != null and not is_instance_valid(_spectating):
+		_spectating = null
+		_spectate_next()
 
 
 func _physics_process(_delta: float) -> void:
-	if run_active and player.global_position.y < -20.0:
-		player.global_position = level.player_spawn
-		player.velocity = Vector3.ZERO
+	var local := player
+	if run_active and local != null and local.global_position.y < -20.0:
+		local.global_position = level.player_spawn
+		local.velocity = Vector3.ZERO
 
+
+func _input(event: InputEvent) -> void:
+	if run == null:
+		return
+	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		if run_active and player != null:
+			player.look(event.relative)
+	elif event.is_action_pressed("ui_cancel"):
+		_capture_mouse(false)
+	elif event.is_action_pressed("toggle_mic"):
+		VoiceChat.muted = not VoiceChat.muted
+		_refresh_voice()
+	elif event is InputEventMouseButton and event.pressed:
+		if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+			_capture_mouse(true)
+			get_viewport().set_input_as_handled()
+		elif _spectate_label != null and event.button_index == MOUSE_BUTTON_LEFT:
+			_spectate_next()
+
+
+func _on_local_finished(result: Dictionary) -> void:
+	run_active = false
+	last_result = result
+	hud.set_extract_progress(0.0)
+	_refresh_voice()
+	if not show_menus or not session.is_online():
+		return
+	# Others are still inside: wait a moment, then watch them.
+	await get_tree().create_timer(2.5 if result.survived else 3.5).timeout
+	if run == null or _menu != null:
+		return
+	_spectate_label = UiKit.label("", 22)
+	_spectate_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+	_spectate_label.position.y -= 90.0
+	_spectate_label.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	hud.add_child(_spectate_label)
+	_spectate_next()
+
+
+## Cycles the camera through teammates who are still in the run.
+func _spectate_next() -> void:
+	if run == null or _spectate_label == null:
+		return
+	var candidates: Array[Player] = []
+	for other in run.all_players():
+		if other != run.local_player and other.is_active():
+			candidates.append(other)
+	if _spectating != null and is_instance_valid(_spectating):
+		_spectating.set_viewed(false)
+	if candidates.is_empty():
+		_spectating = null
+		_spectate_label.text = "等待隊友…"
+		return
+	var index := candidates.find(_spectating)
+	_spectating = candidates[(index + 1) % candidates.size()]
+	_spectating.set_viewed(true)
+	_spectate_label.text = "等待隊友…　正在看：%s（左鍵切換）" % _spectating.display_name
+
+
+func _on_run_ended() -> void:
+	if run == null:
+		return
+	run_active = false
+	if not show_menus:
+		return
+	var result := last_result
+	if not session.is_online():
+		await get_tree().create_timer(2.5 if result.get("survived", false) else 3.5).timeout
+	if run == null:
+		return
+	_capture_mouse(false)
+	hud.visible = false
+	var screen := ResultScreen.new()
+	screen.survived = result.get("survived", false)
+	screen.cause = result.get("cause", "")
+	screen.items = result.get("items", [])
+	screen.payout = result.get("payout", {})
+	screen.lost_gear = result.get("lost_gear", [])
+	screen.continue_requested.connect(func() -> void:
+		if session.is_online():
+			show_lobby()
+		else:
+			show_loadout())
+	_set_menu(screen)
+
+
+# --- Helpers --------------------------------------------------------------------------
 
 func _update_resolution() -> void:
 	if _container == null:
@@ -141,44 +299,8 @@ func _update_resolution() -> void:
 	_container.stretch_shrink = maxi(1, roundi(height / LOW_RES_HEIGHT))
 
 
-func _on_extracted(extracted_player: Player) -> void:
-	var taken := extracted_player.take_all_items()
-	var payout := LootTable.payout(taken)
-	var gear := extracted_player.remaining_gear()
-	GameState.record_extraction(payout.total, gear)
-	extracted_player.input_enabled = false
-	_finish_run({"survived": true, "items": taken, "payout": payout, "cause": "", "lost_gear": []})
-
-
-func _on_player_died(cause: String) -> void:
-	if not run_active:
-		return
-	GameState.record_death()
-	_finish_run({"survived": false, "items": player.items.duplicate(), "payout": {},
-		"cause": cause, "lost_gear": player.remaining_gear()})
-
-
-func _finish_run(result: Dictionary) -> void:
-	run_active = false
-	last_result = result
-	hud.set_extract_progress(0.0)
-	if not show_menus:
-		return
-	await get_tree().create_timer(2.5 if result.survived else 3.5).timeout
-	_capture_mouse(false)
-	hud.visible = false
-	var screen := ResultScreen.new()
-	screen.survived = result.survived
-	screen.cause = result.cause
-	screen.items = result.items
-	screen.payout = result.payout
-	screen.lost_gear = result.lost_gear
-	screen.continue_requested.connect(show_loadout)
-	_set_menu(screen)
-
-
 func _set_menu(menu: Control) -> void:
-	if _menu != null:
+	if _menu != null and is_instance_valid(_menu):
 		_menu.queue_free()
 	_menu = menu
 	if menu != null:
@@ -188,14 +310,19 @@ func _set_menu(menu: Control) -> void:
 
 func _clear_run() -> void:
 	run_active = false
-	for node in [hud, _container]:
-		if node != null and is_instance_valid(node):
-			node.queue_free()
+	# Free immediately so the next run can reuse the same node names.
+	if _container != null and is_instance_valid(_container):
+		remove_child(_container)
+		_container.queue_free()
+	if hud != null and is_instance_valid(hud):
+		hud.queue_free()
 	hud = null
 	_container = null
-	player = null
-	level = null
-	colossus = null
+	_viewport = null
+	run = null
+	_spectating = null
+	_spectate_label = null
+	_voice = null
 
 
 func _capture_mouse(capture: bool) -> void:
