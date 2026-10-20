@@ -7,6 +7,11 @@ var SHOTS := [
 	{"kind": "greeter", "script": Greeter, "pos": Vector3(4.0, 0.1, 15.8), "pitch": 0.0},
 	{"kind": "collector", "script": Collector, "pos": Vector3(3.6, 0.1, 15.6), "pitch": -0.1},
 	{"kind": "rats", "script": RatSwarm, "pos": Vector3(4.0, 0.1, 17.6), "pitch": -0.75},
+	{"kind": "centipede", "script": Centipede, "pos": Vector3(3.0, 0.1, 15.0), "pitch": -0.2},
+	{"kind": "mother", "script": LullabyMother, "pos": Vector3(4.0, 0.1, 11.0), "pitch": 0.35},
+	{"kind": "fog_walker", "script": FogWalker, "pos": Vector3(4.0, 0.1, 15.5), "pitch": 0.0},
+	{"kind": "tuner", "script": Tuner, "pos": Vector3(4.0, 0.1, 15.5), "pitch": 0.05},
+	{"kind": "child", "script": HideChild, "pos": Vector3(4.0, 0.1, 16.5), "pitch": -0.3},
 ]
 
 
@@ -22,7 +27,7 @@ func _run() -> void:
 	GameState.reset()
 	Run.director_enabled = false
 	Run.forced_map = "factory"
-	Run.forced_monsters = ["watcher", "greeter", "collector", "rats"]
+	Run.forced_monsters = ["watcher", "greeter", "collector", "rats", "centipede", "mother", "fog_walker", "tuner", "child"]
 	var main = load("res://scenes/main.tscn").instantiate()
 	main.show_menus = false
 	root.add_child(main)
@@ -49,8 +54,21 @@ func _run() -> void:
 		monster.rotation.y = 0.0 if shot.kind == "rats" else PI * 0.92
 		if monster is Collector:
 			monster.cart_load = 4
+		if monster is FogWalker:
+			monster.revealed = true
+		if monster is HideChild:
+			monster.state = HideChild.State.HIDE
+		if monster is Centipede:
+			# Lay the body out in a line receding from the camera.
+			var trail := PackedVector3Array()
+			for i in Centipede.SEGMENTS * 2:
+				trail.append(shot.pos + Vector3(-2.0 + 0.55 * i, 0, -0.35 * i + 0.4 * sin(i * 0.6)))
+			monster.trail = trail
+			monster.process_mode = Node.PROCESS_MODE_INHERIT
+			monster.set_physics_process(false)
+			monster._pose_body()
 		var lamp: OmniLight3D = null
-		if monster is Watcher:
+		if monster is Watcher or monster is LullabyMother or monster is Centipede or monster is FogWalker or monster is Tuner:
 			# Light it from below so it reads in a still frame.
 			lamp = OmniLight3D.new()
 			lamp.light_energy = 2.5

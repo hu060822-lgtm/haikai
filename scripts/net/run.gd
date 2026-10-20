@@ -170,7 +170,9 @@ func _host_spawn_monsters() -> void:
 					data.pos = level.random_patrol_point() + Vector3(0, 3.0, 0)
 				"watcher":
 					data.pos = _far_patrol_point()
-				"greeter", "collector", "rats":
+				"centipede", "mother":
+					data.pos = _far_patrol_point()
+				"greeter", "collector", "rats", "fog_walker", "tuner", "child":
 					data.pos = level.random_patrol_point() + Vector3.UP * 0.1
 				"mimic":
 					var spot: Dictionary = spots[serial % spots.size()]
@@ -327,6 +329,32 @@ func _spawn_monster(data: Dictionary) -> Node:
 			rats.home = data.pos
 			rats.rng.seed = data.seed
 			monster = rats
+		"centipede":
+			var centipede := Centipede.new()
+			centipede.route = Centipede.make_route(level.patrol_points)
+			centipede.rng.seed = data.seed
+			monster = centipede
+		"mother":
+			var mother := LullabyMother.new()
+			mother.patrol_points.assign(level.patrol_points)
+			mother.rng.seed = data.seed
+			monster = mother
+		"fog_walker":
+			var walker := FogWalker.new()
+			walker.patrol_points.assign(level.patrol_points)
+			walker.rng.seed = data.seed
+			monster = walker
+		"tuner":
+			var tuner := Tuner.new()
+			tuner.patrol_points.assign(level.patrol_points)
+			tuner.rng.seed = data.seed
+			monster = tuner
+		"child":
+			var child := HideChild.new()
+			child.patrol_points.assign(level.patrol_points)
+			child.hide_spots.assign(level.loot_spots)
+			child.rng.seed = data.seed
+			monster = child
 		_:
 			var giant := BoilerColossus.new()
 			giant.rng.seed = data.seed

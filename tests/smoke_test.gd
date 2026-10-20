@@ -30,6 +30,11 @@ func _run() -> void:
 	await _test_greeter()
 	await _test_collector()
 	await _test_rats()
+	await _test_centipede()
+	await _test_mother()
+	await _test_fog_walker()
+	await _test_tuner()
+	await _test_child()
 	Run.forced_monsters = ["colossus"]
 	await _test_maps()
 	print("SMOKE TEST %s (%d failures)" % ["PASSED" if _failures == 0 else "FAILED", _failures])
@@ -291,6 +296,127 @@ func _test_rats() -> void:
 	GameNoise.emit(self, rats.global_position + Vector3(1, 0, 0), 8.0, GameNoise.Kind.LANDING)
 	await _frames(2)
 	_check(rats.state == RatSwarm.State.SCATTER, "a landing next to them scatters them")
+	await _end_run(main)
+
+
+func _test_centipede() -> void:
+	print("centipede")
+	Run.forced_monsters = ["centipede"]
+	var main = await _new_run()
+	var player: Player = main.player
+	var centipede: Centipede = _monster(main, Centipede)
+	_check(centipede != null and centipede.route.size() >= 4, "centipede spawns with a fixed loop")
+	player.global_position = Vector3(-13, 0.1, 18)
+	centipede._rest = 0.01
+	var start := centipede.global_position
+	await _frames(60)
+	_check(centipede.running and centipede.global_position.distance_to(start) > 3.0, "it tears along its route")
+	player.global_position = centipede.global_position + Vector3.UP * 0.1
+	await _frames(5)
+	_check(player.is_dead, "anything on the track gets run over")
+	await _end_run(main)
+
+
+func _test_mother() -> void:
+	print("mother")
+	Run.forced_monsters = ["mother"]
+	var main = await _new_run()
+	var player: Player = main.player
+	var mother: LullabyMother = _monster(main, LullabyMother)
+	_check(mother != null, "mother spawns")
+	mother.global_position = Vector3(2, 0.1, -6)
+	player.global_position = Vector3(2, 0.1, 10)
+	player.set_lantern(true)
+	await _frames(120)
+	_check(mother.global_position.distance_to(player.global_position) < 15.0, "she drifts toward you")
+	GameNoise.emit(self, mother.global_position + Vector3(3, 0, 0), 10.0, GameNoise.Kind.MUSIC)
+	await _frames(10)
+	var held := mother.global_position
+	await _frames(60)
+	_check(mother.listening and mother.global_position.distance_to(held) < 0.3, "music stops her to listen")
+	mother._listen = 0.0
+	var waited := 0
+	while not player.is_dead and waited < 900:
+		await physics_frame
+		waited += 1
+	_check(player.is_dead, "once she holds you, you don't get up")
+	await _end_run(main)
+
+
+func _test_fog_walker() -> void:
+	print("fog walker")
+	Run.forced_monsters = ["fog_walker"]
+	var main = await _new_run({"weapon": "crowbar"})
+	var player: Player = main.player
+	var walker: FogWalker = _monster(main, FogWalker)
+	_check(walker != null and not walker.revealed, "fog walker spawns unseen")
+	walker.global_position = Vector3(2, 0.1, 2)
+	player.global_position = Vector3(2, 0.1, 9)
+	var waited := 0
+	while player.health == Player.MAX_HEALTH and waited < 300:
+		await physics_frame
+		waited += 1
+	_check(player.health < Player.MAX_HEALTH, "it strikes out of nowhere (hp=%d)" % player.health)
+	walker.weapon_hit()
+	await _frames(3)
+	_check(walker.revealed, "hitting it makes it show up")
+	await _end_run(main)
+
+
+func _test_tuner() -> void:
+	print("tuner")
+	Run.forced_monsters = ["tuner"]
+	var main = await _new_run()
+	var player: Player = main.player
+	var tuner: Tuner = _monster(main, Tuner)
+	_check(tuner != null, "tuner spawns")
+	tuner.global_position = Vector3(8, 0.1, -16)
+	player.global_position = Vector3(-13, 0.1, 18)
+	await _frames(300)
+	_check(not tuner.memory.is_empty(), "it remembers where scavengers go")
+	GameNoise.emit(self, Vector3(-6, 0.1, -6), 12.0, GameNoise.Kind.IMPACT)
+	await _frames(2)
+	_check(tuner._agent.target_position.distance_to(Vector3(-6, 0.1, -6)) < 1.0, "a thrown noise pulls it the wrong way")
+	GameNoise.emit(self, tuner.global_position, 8.0, GameNoise.Kind.MUSIC)
+	await _frames(2)
+	_check(tuner.stunned, "a tune scrambles it")
+	tuner._stun = 0.0
+	tuner.global_position = Vector3(-3, 0.1, 16.5)
+	player.global_position = Vector3(-8.4, 0.1, 16.5)
+	await _frames(20)
+	_check(main.level.gates[0].closed, "it shuts the door on you")
+	await _end_run(main)
+
+
+func _test_child() -> void:
+	print("child")
+	Run.forced_monsters = ["child"]
+	var main = await _new_run()
+	var player: Player = main.player
+	var child: HideChild = _monster(main, HideChild)
+	_check(child != null, "child spawns")
+	child.global_position = Vector3(2, 0.1, 0)
+	player.global_position = Vector3(2, 0.1, 9)
+	player.rotation.y = PI
+	await _frames(20)
+	_check(child.state == HideChild.State.COUNT, "it starts counting when you come near")
+	await _frames(340)
+	_check(child.state == HideChild.State.HIDE, "then it hides")
+	var loot_before: int = main.run.loot_root.get_child_count()
+	child.global_position = Vector3(2, 0.1, 4)
+	player.rotation.y = 0.0
+	player.set_lantern(true)
+	await _frames(10)
+	_check(child.state == HideChild.State.AWAY and main.run.loot_root.get_child_count() > loot_before, "finding it first earns a present")
+	child.global_position = Vector3(2, 0.1, 2)
+	child.state = HideChild.State.HIDE
+	child._timer = 0.0
+	player.rotation.y = PI
+	var waited := 0
+	while player.lantern_on and waited < 400:
+		await physics_frame
+		waited += 1
+	_check(not player.lantern_on, "if it finds you, your lantern goes out")
 	await _end_run(main)
 
 

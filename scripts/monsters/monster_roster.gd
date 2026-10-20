@@ -11,6 +11,11 @@ const MONSTERS := {
 	"greeter": {"name": "迎賓員", "size": "medium", "count": [1, 1]},
 	"collector": {"name": "回收員", "size": "medium", "count": [1, 1]},
 	"rats": {"name": "發條鼠群", "size": "small", "count": [1, 2]},
+	"centipede": {"name": "蜈蚣列車", "size": "large", "count": [1, 1]},
+	"mother": {"name": "哄睡的母親", "size": "large", "count": [1, 1]},
+	"fog_walker": {"name": "霧行者", "size": "medium", "count": [1, 1]},
+	"tuner": {"name": "調音師", "size": "medium", "count": [1, 1]},
+	"child": {"name": "捉迷藏的孩子", "size": "small", "count": [1, 1]},
 }
 const MIN_KINDS := 2
 const MAX_KINDS := 4
