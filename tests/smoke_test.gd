@@ -35,6 +35,7 @@ func _run() -> void:
 	await _test_fog_walker()
 	await _test_tuner()
 	await _test_child()
+	await _test_items()
 	Run.forced_monsters = ["colossus"]
 	await _test_maps()
 	print("SMOKE TEST %s (%d failures)" % ["PASSED" if _failures == 0 else "FAILED", _failures])
@@ -60,7 +61,22 @@ func _test_content() -> void:
 	var ids := {}
 	for item in LootTable.ITEMS:
 		ids[item.id] = true
-	_check(LootTable.ITEMS.size() == 60 and ids.size() == 60, "60 distinct loot items (%d)" % LootTable.ITEMS.size())
+	_check(LootTable.ITEMS.size() == 100 and ids.size() == 100, "100 distinct loot items (%d)" % LootTable.ITEMS.size())
+	var pool_rng := RandomNumberGenerator.new()
+	pool_rng.seed = 11
+	var pool := LootTable.make_pool(pool_rng)
+	_check(pool.size() == 31 and not 94 in pool, "each run draws a pool of 31 kinds, never the colossus bolt (%d)" % pool.size())
+	var pooled := true
+	for i in 200:
+		if not LootTable.roll(pool_rng, 0.5, pool).id in pool:
+			pooled = false
+	_check(pooled, "rolls stay inside the run's pool")
+	var letters := []
+	for letter in LootTable.NEON_LETTERS:
+		var sign := LootTable.make(LootTable.NEON_ID)
+		sign.letter = letter
+		letters.append(sign)
+	_check(LootTable.payout(letters).bonus == LootTable.NEON_BONUS, "neon letters spelling OPEN pay the set bonus")
 	var dinos := [LootTable.ITEMS[0], LootTable.ITEMS[0]]
 	for item in LootTable.ITEMS:
 		if item.id == 19:
@@ -417,6 +433,75 @@ func _test_child() -> void:
 		await physics_frame
 		waited += 1
 	_check(not player.lantern_on, "if it finds you, your lantern goes out")
+	await _end_run(main)
+
+
+func _test_items() -> void:
+	print("items")
+	Run.forced_monsters = ["colossus"]
+	var main = await _new_run()
+	var player: Player = main.player
+	var colossus: BoilerColossus = main.colossus
+	colossus.global_position = Vector3(8, 0.1, -16)
+	colossus.set_physics_process(false)
+
+	player.stamina = 0.1
+	player.pickup(LootTable.make(17))
+	player.use_item()
+	await _frames(2)
+	_check(player.stamina == 1.0 and not player.carries(17) and player.dream > 0.5, "warm milk restores stamina and makes the world dreamy")
+
+	player.pickup(LootTable.make(85))
+	_check(player._heavy_slowed(), "heavy loot slows a lone scavenger")
+	_check(player.carries_tag("heavy"), "the backpack's tags are known (for the host's monsters)")
+	player.take_all_items()
+
+	player.pickup(LootTable.make(14))
+	var loot_before: int = main.run.loot_root.get_child_count()
+	for i in 40:
+		player._alive_timer = 0.0
+		await _frames(1)
+		if not player.carries(14):
+			break
+	await _frames(5)
+	_check(not player.carries(14) and main.run.loot_root.get_child_count() > loot_before, "a live fish wriggles out of your hands")
+
+	player.pickup(LootTable.make(81))
+	colossus.global_position = player.global_position + Vector3(4, 0, 0)
+	player.use_item()
+	await _frames(2)
+	_check(TimeWarp.instance._slow.has(colossus), "the hourglass slows monsters nearby")
+	colossus.global_position = Vector3(8, 0.1, -16)
+
+	var locker: Locker = main.level.lockers[0]
+	player.pickup(LootTable.make(43))
+	player._focused = locker
+	player.use_item()
+	await _frames(5)
+	_check(locker.is_open and not player.carries(43), "the spare key opens a locker")
+
+	player.pickup(LootTable.make(71))
+	await _frames(40)
+	_check(main.hud._readout.text.begins_with("溫度計"), "the thermometer shows a reading (%s)" % main.hud._readout.text)
+
+	player.pickup(LootTable.make(77))
+	player.use_item()
+	await _frames(5)
+	_check(player._use_cooldown.has("button"), "the don't-press button can be pressed")
+
+	colossus.set_physics_process(true)
+	colossus._enter(BoilerColossus.State.VENT)
+	colossus.host_action("bolt", player)
+	await _frames(5)
+	_check(player.carries(94) and colossus.bolt_taken, "you can wrench the bolt off a venting colossus")
+	colossus.set_physics_process(false)
+
+	player.take_all_items()
+	player.pickup(LootTable.make(26))
+	player.global_position = main.level.player_spawn + Vector3(0, 9, 0)
+	player.velocity = Vector3.ZERO
+	await _frames(40)
+	_check(player.velocity.y >= -Player.UMBRELLA_FALL_SPEED - 0.5 and not player.is_dead, "an umbrella slows your fall")
 	await _end_run(main)
 
 

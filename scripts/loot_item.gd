@@ -54,6 +54,15 @@ func _ready() -> void:
 	sync.replication_config = config
 	add_child(sync)
 
+	# Living loot won't stay put.
+	if LootTable.has_tag(data, "alive") and multiplayer.is_server():
+		freeze = false
+		var hop := Timer.new()
+		hop.wait_time = randf_range(2.5, 5.0)
+		hop.autostart = true
+		hop.timeout.connect(_hop)
+		add_child(hop)
+
 	# Rare loot glints so it reads in the dark.
 	if data.rarity >= 2:
 		var glint := OmniLight3D.new()
@@ -80,6 +89,11 @@ func interact(player: Player) -> void:
 		Run.instance.request_pickup(self)
 	elif player.pickup(to_data()):
 		queue_free()
+
+
+func _hop() -> void:
+	if linear_velocity.length() < 0.3:
+		apply_central_impulse(Vector3(randf_range(-1.0, 1.0), 2.2, randf_range(-1.0, 1.0)) * mass)
 
 
 func _on_body_entered(_body: Node) -> void:

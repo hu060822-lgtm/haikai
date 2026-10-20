@@ -156,7 +156,7 @@ func _find_target() -> Player:
 	var station := Run.instance.level as ResearchStation if Run.instance != null else null
 	for player in MonsterKit.active_players(get_tree()):
 		var distance := player.global_position.distance_to(global_position)
-		if distance >= best_distance or is_cold(player, station):
+		if distance >= best_distance or is_cold(player, station) or player.has_effect("diving"):
 			continue
 		best = player
 		best_distance = distance
@@ -167,9 +167,8 @@ func _find_target() -> Player:
 func is_cold(player: Player, station: ResearchStation = null) -> bool:
 	if station != null and station.is_outdoors(player.global_position):
 		return true
-	for item in player.items:
-		if LootTable.has_tag(item, "cold"):
-			return player.global_position.distance_to(global_position) < COLD_RANGE * 3.0
+	if player.carries_tag("cold"):
+		return player.global_position.distance_to(global_position) < COLD_RANGE * 3.0
 	return false
 
 

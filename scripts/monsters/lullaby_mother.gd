@@ -6,6 +6,7 @@ extends CharacterBody3D
 ## Weaknesses players can learn:
 ##   - Music stops her. While something plays a tune nearby she stands and listens.
 ##   - Don't run where she can see you: it upsets her, and she comes faster.
+##   - Never take her cradle. She will always find you.
 ## Tells: the lullaby, and the air turning warm.
 
 const HEIGHT := 4.0
@@ -20,6 +21,7 @@ const HOLD_DISTANCE := 1.9
 const LISTEN_TIME := 8.0
 const MUSIC_RANGE := 22.0
 const RUN_SPEED := 4.3
+const CRADLE_ID := 96
 
 ## Replicated: listening (frozen, head tilted), upset (faster, arms out).
 var listening := false
@@ -133,6 +135,15 @@ func _find_target() -> Player:
 	var eye := global_position + Vector3.UP * (HEIGHT - 0.4)
 	var best: Player = null
 	var best_distance := INF
+	# Whoever took her cradle, she always knows where they are.
+	for player in MonsterKit.active_players(get_tree()):
+		if player.carries(CRADLE_ID):
+			var distance := global_position.distance_to(player.global_position)
+			if distance < best_distance:
+				best = player
+				best_distance = distance
+	if best != null:
+		return best
 	for player in MonsterKit.active_players(get_tree()):
 		var chest := player.global_position + Vector3.UP
 		var distance := eye.distance_to(chest)

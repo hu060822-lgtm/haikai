@@ -269,6 +269,73 @@ def static():
     return out
 
 
+def tune():
+    """A cheerful little cassette tune, warbly from a worn tape."""
+    notes = [0, 2, 4, 7, 4, 2]
+    beat = int(RATE * 0.22)
+    out = []
+    for k, semis in enumerate(notes):
+        f = 440.0 * 2 ** (semis / 12)
+        for i in range(beat):
+            t = (k * beat + i) / RATE
+            wobble = 1.0 + 0.01 * math.sin(2 * math.pi * 5 * t)
+            tone = 1.0 if math.sin(2 * math.pi * f * wobble * t) > 0 else -1.0
+            out.append(tone * 0.18 * env(i, beat, 0.02, 0.5))
+    return out
+
+
+def boom():
+    """A short, ugly explosion."""
+    n = int(RATE * 1.2)
+    base = lowpass(noise(n), 0.15)
+    return [b * 2.5 * math.exp(-i / (RATE * 0.25)) + math.sin(2 * math.pi * 45 * i / RATE) * 0.6 * math.exp(-i / (RATE * 0.3))
+            for i, b in enumerate(base)]
+
+
+def zap():
+    """An electric crackle."""
+    n = int(RATE * 0.4)
+    out = []
+    for i, b in enumerate(noise(n)):
+        t = i / RATE
+        buzz = 1.0 if math.sin(2 * math.pi * 120 * t) > 0 else -1.0
+        out.append((b * 0.6 + buzz * 0.3) * env(i, n, 0.01, 0.4))
+    return out
+
+
+def bang():
+    """A gunshot / railgun crack."""
+    n = int(RATE * 0.8)
+    base = noise(n)
+    return [b * math.exp(-i / (RATE * 0.06)) * 1.4 + math.sin(2 * math.pi * 70 * i / RATE) * math.exp(-i / (RATE * 0.12)) * 0.7
+            for i, b in enumerate(base)]
+
+
+def quack():
+    """A rubber duck."""
+    n = int(RATE * 0.25)
+    out = []
+    for i in range(n):
+        t = i / RATE
+        f = 900 - 500 * t / 0.25
+        tone = 1.0 if math.sin(2 * math.pi * f * t) > 0 else -1.0
+        out.append(tone * 0.25 * env(i, n, 0.02, 0.5))
+    return out
+
+
+def roar():
+    """The megaphone: a distorted shout."""
+    n = int(RATE * 0.9)
+    base = lowpass(noise(n), 0.3)
+    out = []
+    for i, b in enumerate(base):
+        t = i / RATE
+        voice = math.sin(2 * math.pi * (180 + 30 * math.sin(2 * math.pi * 4 * t)) * t)
+        s = (voice * 0.8 + b * 0.5) * 2.0
+        out.append(max(-0.7, min(0.7, s)) * env(i, n, 0.02, 0.3))
+    return out
+
+
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
     for name, fn in [("thump", thump), ("hiss", hiss), ("whistle", whistle), ("step", step),
@@ -277,6 +344,7 @@ if __name__ == "__main__":
                      ("flutter", flutter), ("screech", screech), ("tick", tick), ("bite", bite),
                      ("chime", chime), ("wind", wind),
                      ("lullaby", lullaby), ("cough", cough), ("rumble", rumble), ("giggle", giggle),
-                     ("static", static)]:
+                     ("static", static), ("tune", tune), ("boom", boom), ("zap", zap),
+                     ("bang", bang), ("quack", quack), ("roar", roar)]:
         write(name, fn())
     print("sounds written to", os.path.abspath(OUT))
