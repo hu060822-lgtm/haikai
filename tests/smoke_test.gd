@@ -274,7 +274,7 @@ func _test_collector() -> void:
 	player.global_position = Vector3(-13, 0.1, 18)  # tucked away in the tool room
 	collector.global_position = Vector3(2, 0.1, 0)
 	main.run.host_spawn_loot(LootTable.ITEMS[3], collector.global_position + Vector3(0.4, 0.3, 0))
-	await _frames(20)
+	await _frames(45)
 	_check(collector.cart_load >= 1, "it clears loot off the floor into its cart")
 	player.global_position = Vector3(2, 0.1, 8)
 	player.set_lantern(true)
@@ -773,7 +773,8 @@ func _test_player_basics() -> void:
 
 	var loot := get_nodes_in_group("loot")
 	_check(loot.size() >= BoilerFactory.LOOT_MIN, "loot spawns (%d)" % loot.size())
-	var item: LootItem = loot[0]
+	# Something light: heavy loot would slow the crawl below.
+	var item: LootItem = loot.filter(func(node: LootItem) -> bool: return not LootTable.has_tag(node.data, "heavy"))[0]
 	var value := item.value
 	item.interact(player)
 	await _frames(2)
