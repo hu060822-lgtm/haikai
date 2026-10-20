@@ -126,7 +126,7 @@ func is_watched() -> bool:
 		var eye := player.head_position()
 		var to := chest - eye
 		var distance := to.length()
-		var seen_range := SEEN_RANGE_LIT if player.lantern_on else SEEN_RANGE_DARK
+		var seen_range := SEEN_RANGE_LIT if player.is_lit() else SEEN_RANGE_DARK
 		if distance > seen_range:
 			continue
 		if player.look_direction().dot(to / maxf(distance, 0.01)) < cos(deg_to_rad(VIEW_HALF_ANGLE_DEG)):

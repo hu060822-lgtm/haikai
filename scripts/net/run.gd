@@ -745,6 +745,20 @@ func local_extracted() -> void:
 	local_finished.emit({"survived": true, "items": payout.items_list, "payout": payout, "cause": "", "lost_gear": []})
 
 
+## The dreamcore map woke this player up: out you go, but half your loot stays in the dream.
+func local_woken() -> void:
+	if finished or local_player == null:
+		return
+	var kept: Array[Dictionary] = []
+	var items := local_player.items.duplicate()
+	items.shuffle()
+	for i in items.size() / 2:
+		kept.append(items[i])
+	local_player.items.assign(kept)
+	local_player.message.emit("有人把你叫醒了。你手上的東西少了一半。")
+	local_extracted()
+
+
 func _on_local_died(cause: String) -> void:
 	if finished:
 		return

@@ -1,6 +1,6 @@
 extends SceneTree
 ## Renders a few views of the newer maps, plus the guardian's overview of each.
-## Run (needs a display): godot --path . --script res://tools/map_shots.gd -- <out_dir>
+## Run (needs a display): godot --path . --script res://tools/map_shots.gd -- <out_dir> [map]
 
 const SHOTS := {
 	"mall": [
@@ -19,6 +19,14 @@ const SHOTS := {
 		{"name": "station_garage", "pos": Vector3(10.0, 0.1, 18.0), "yaw": -PI / 2.0, "pitch": 0.0},
 		{"name": "station_lab", "pos": Vector3(-11.0, 0.1, 20.0), "yaw": PI / 2.0, "pitch": -0.05},
 	],
+	"afternoon": [
+		{"name": "afternoon_corridor", "pos": Vector3(2.0, 0.1, 0.0), "yaw": -PI / 2.0, "pitch": 0.0},
+		{"name": "afternoon_living", "pos": Vector3(0.0, 0.1, -2.5), "yaw": 0.0, "pitch": 0.0},
+		{"name": "afternoon_playground", "pos": Vector3(-8.0, 0.1, -4.0), "yaw": 0.6, "pitch": 0.1},
+		{"name": "afternoon_dining", "pos": Vector3(8.0, 0.1, -10.0), "yaw": -PI / 2.0, "pitch": -0.05},
+		{"name": "afternoon_bedroom", "pos": Vector3(-7.0, 0.1, 4.0), "yaw": PI * 0.75, "pitch": 0.15},
+		{"name": "afternoon_pool", "pos": Vector3(8.0, 0.1, 4.0), "yaw": -PI * 0.75, "pitch": -0.05},
+	],
 }
 
 
@@ -34,7 +42,11 @@ func _run() -> void:
 	GameState.reset()
 	Run.forced_monsters = ["colossus"]
 	Run.director_enabled = false
+	# Optional second argument: only this map.
+	var only: String = args[1] if args.size() > 1 else ""
 	for id in SHOTS:
+		if only != "" and id != only:
+			continue
 		Run.forced_map = id
 		var main = load("res://scenes/main.tscn").instantiate()
 		main.show_menus = false
