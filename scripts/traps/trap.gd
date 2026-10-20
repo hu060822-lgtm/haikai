@@ -3,7 +3,7 @@ extends Node3D
 ## Base of every trap (see Traps.create). A trap is built the same way on every peer
 ## from the map seed; only the host decides when it goes off. The host broadcasts state
 ## changes with _state (visuals and sounds on every peer) and sends the effect on a
-## player (damage, snare, slow, shove, chill) to that player's owner with _affect.
+## player (damage, snare, slow, shove) to that player's owner with _affect.
 ## Monsters ignore traps; the noise a trap makes is what draws them in.
 
 var kind := ""
@@ -121,7 +121,7 @@ func host_noise(radius: float, kind_id := GameNoise.Kind.IMPACT, at := Vector3.I
 
 
 ## Host -> the player's owner. effect keys: damage, cause, note, snare (s), slow (s),
-## slow_factor, push (velocity), chill (body heat lost on the ice station), shake.
+## slow_factor, push (velocity), shake.
 func host_affect(player: Player, effect: Dictionary) -> void:
 	var owner_id := player.get_multiplayer_authority()
 	if owner_id == multiplayer.get_unique_id():
@@ -150,8 +150,6 @@ func _affect(player_name: String, effect: Dictionary) -> void:
 		player.velocity += effect.push
 	if effect.has("shake"):
 		player.add_shake(effect.shake)
-	if effect.has("chill") and map != null and map.get("body_heat") != null:
-		map.body_heat = maxf(map.body_heat - effect.chill, 0.0)
 	if effect.get("damage", 0.0) > 0.0:
 		player.take_damage(effect.damage, effect.get("cause", "死於陷阱"))
 	if effect.get("note", "") != "" and not player.is_dead:

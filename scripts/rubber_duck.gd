@@ -1,13 +1,18 @@
 class_name RubberDuck
 extends RigidBody3D
-## The exploding rubber duck. Quacks as it lands so monsters come running, then goes off.
+## The duck launcher's grenade. Quacks as it lands so monsters come running, then goes off.
 ## Every peer simulates its own copy for looks and sound; only the host's copy makes
-## noise and does damage.
+## noise and does damage (Run.host_explode with the launcher's numbers).
 
-const FUSE := 4.0
+const FUSE := 3.0
 const QUACK_INTERVAL := 0.8
 const QUACK_RADIUS := 20.0
 
+## Set by Run before it enters the tree: the blast, and the shooter's peer id.
+var damage := 90.0
+var radius := 4.0
+var effects := {}
+var shooter := 0
 var _fuse := FUSE
 var _quack := 0.3
 
@@ -70,7 +75,7 @@ func _physics_process(delta: float) -> void:
 		if multiplayer.is_server():
 			GameNoise.emit_local(get_tree(), global_position, QUACK_RADIUS, GameNoise.Kind.ITEM)
 	if _fuse <= 0.0:
-		Sfx.play_3d(get_parent(), global_position, "boom", 6.0, 60.0)
 		if multiplayer.is_server() and Run.instance != null:
-			Run.instance.host_explode(global_position)
+			var attacker := Run.instance.players_root.get_node_or_null(str(shooter)) as Player
+			Run.instance.host_explode(global_position, damage, radius, effects, attacker)
 		queue_free()

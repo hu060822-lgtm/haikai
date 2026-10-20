@@ -59,6 +59,32 @@ static func make_route(points: Array[Vector3]) -> Array[Vector3]:
 	return loop
 
 
+## Host: a weapon hit it. At full tilt the plates turn bullets aside (x0.25); resting,
+## its body is open (x1), and the headlamp end is the soft part (x2). Shot while it
+## rests, it cuts its breather short and bolts on round the loop: the route never changes.
+func on_hit(hit: Dictionary) -> float:
+	var point: Vector3 = hit.get("point", global_position)
+	var at_head := point.distance_to(global_position + Vector3.UP * 0.6) < 1.6
+	if running:
+		return 0.5 if at_head else 0.25
+	if _rest > 2.0:
+		_rest = 2.0
+		_hiss.rpc()
+	return 2.0 if at_head else 1.0
+
+
+## Host: broken. It derails: the lamp goes dark and it lies still a long while.
+func on_broken() -> void:
+	running = false
+	_rest = REST_TIME
+	_hiss.rpc()
+
+
+@rpc("authority", "call_local", "reliable")
+func _hiss() -> void:
+	Sfx.play_3d(get_parent(), global_position, "hiss", 4.0, 40.0, 0.5)
+
+
 func _physics_process(delta: float) -> void:
 	if multiplayer.is_server():
 		_think(delta)

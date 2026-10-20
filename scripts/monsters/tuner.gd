@@ -54,6 +54,7 @@ var _hit_cooldown := 0.0
 var _lost := 0.0
 var _doors := {}  # gate index -> seconds until it reopens
 var _whine := 2.0
+var _learned := {}  # hit kind -> times it has been hit that way
 
 
 func _ready() -> void:
@@ -76,6 +77,29 @@ func _ready() -> void:
 	_mimic_timer = rng.randf_range(MIMIC_INTERVAL.x, MIMIC_INTERVAL.y)
 	_build_model()
 	MonsterKit.add_sync(self, [".:position", ".:rotation", ".:stunned", ".:hunting"])
+
+
+## Host: a weapon hit it. It LEARNS: the first hit of a kind hurts (x1.5), and every
+## repeat of the same trick hurts less, down to a quarter. Mix your weapons up. While a
+## tune has it scrambled it can't learn anything, and it hurts double.
+func on_hit(hit: Dictionary) -> float:
+	var attacker: Player = hit.get("attacker") as Player
+	if attacker != null and attacker.is_active():
+		_target = attacker
+		_lost = 0.0
+	if stunned:
+		return 2.0
+	var effects: Dictionary = hit.get("effects", {})
+	if effects.get("dot", false):
+		return 1.0  # still burning from a hit it already learned from
+	var names: Array = effects.keys()
+	names.sort()
+	var key := "bullet" if names.is_empty() else ",".join(PackedStringArray(names.map(func(name) -> String: return str(name))))
+	var seen: int = _learned.get(key, 0)
+	_learned[key] = seen + 1
+	if seen == 2 and attacker != null:
+		MonsterKit.tell(attacker, &"remote_warn", ["調音師歪著頭，好像已經習慣這種攻擊了。換別的打法！", 0.0])
+	return maxf(0.25, 1.5 - 0.35 * seen)
 
 
 ## Every sound pulls it; a tune scrambles it.

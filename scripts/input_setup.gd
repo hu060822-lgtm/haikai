@@ -13,12 +13,15 @@ const BINDINGS := {
 	"lantern": [KEY_F],
 	"drop": [KEY_G],
 	"use_boost": [KEY_Q],
-	"use_item": [KEY_R],
+	"use_item": [KEY_X],
+	"reload": [KEY_R],
+	"melee": [KEY_V],
 	"toggle_mic": [KEY_M],
 }
 
 const MOUSE_BINDINGS := {
 	"use_weapon": [MOUSE_BUTTON_LEFT],
+	"aim": [MOUSE_BUTTON_RIGHT],
 }
 
 

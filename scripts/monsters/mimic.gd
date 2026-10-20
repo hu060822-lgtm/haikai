@@ -5,12 +5,14 @@ extends CharacterBody3D
 ## weapons or gear for a while; then it scuttles off to disguise itself somewhere else.
 ## Tells: it ticks softly and twitches now and then.
 ## Weakness players can learn: poke it with a weapon (crowbar or marble) and it dies.
+## But it dies SHRIEKING: shoot a mimic and everything nearby hears where you are.
 
 const BITE_SECONDS := 8.0
 const BITE_DAMAGE := 15.0
 const FLEE_SPEED := 4.0
 const FLEE_TIME := 2.5
 const HIDE_TIME := 25.0
+const SHRIEK_RADIUS := 22.0
 
 ## Replicated: the item it pretends to be, and whether it's currently pretending.
 var disguise: Dictionary = {}:
@@ -111,14 +113,33 @@ func host_action(action: String, player: Player) -> void:
 			_timer = FLEE_TIME
 			_play.rpc("bite")
 		"kill":
-			_play.rpc("screech")
-			queue_free()
+			host_kill()
+
+
+## Host: a weapon hit it. If it somehow lives, it drops the act and scuttles off.
+func on_hit(hit: Dictionary) -> float:
+	if hidden:
+		return 0.0
+	if disguised:
+		_flee_from = hit.get("from", global_position)
+		disguised = false
+		_timer = FLEE_TIME
+	return 1.0
+
+
+## Host: it dies with a shriek that carries.
+func host_kill() -> void:
+	if is_queued_for_deletion():
+		return
+	_play.rpc("screech")
+	GameNoise.emit_local(get_tree(), global_position, SHRIEK_RADIUS, GameNoise.Kind.VOICE)
+	queue_free()
 
 
 @rpc("authority", "call_local", "reliable")
 func _play(sound: String) -> void:
-	var pitch := 2.2 if sound == "screech" else 1.0
-	Sfx.play_3d(get_parent(), global_position, sound, -2.0, 25.0, pitch)
+	var shriek := sound == "screech"
+	Sfx.play_3d(get_parent(), global_position, sound, 4.0 if shriek else -2.0, 45.0 if shriek else 25.0, 2.2 if shriek else 1.0)
 
 
 func _redisguise() -> void:

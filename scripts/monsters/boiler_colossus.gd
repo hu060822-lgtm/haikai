@@ -129,6 +129,27 @@ func enrage(noise_position: Vector3) -> void:
 		_investigate(noise_position)
 
 
+## Host: a weapon hit it. Bullets barely dent the boiler plate, except while it vents
+## (the firebox is open: double damage). Every hit tells it where the shot came from.
+func on_hit(hit: Dictionary) -> float:
+	if state == State.VENT:
+		return 2.0
+	var from: Vector3 = hit.get("from", global_position)
+	if state == State.CHASE:
+		if _since_seen > 0.5:
+			_last_seen = from
+	else:
+		_investigate(from)
+	return 0.6
+
+
+## Host: broken (hit points ran out). The boiler blows: it stands venting a long jet of
+## steam, then comes back enraged for the rest of the run.
+func on_broken() -> void:
+	_enter(State.VENT)
+	enraged = true
+
+
 func hear(position: Vector3, radius: float, _kind: int) -> void:
 	if state == State.VENT:
 		return

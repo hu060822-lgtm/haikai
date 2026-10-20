@@ -7,7 +7,7 @@ class_name LootTable
 ## slowly (stand next to a teammate to share the load), cursed = valuable but trouble,
 ## alive = wriggles out of your hands, music = plays a tune (some monsters stop to listen),
 ## cold = icy (the fog walker keeps away).
-## "use": what pressing R does with it (see Player.use_item). "effect": a passive effect
+## "use": what pressing X does with it (see Player.use_item). "effect": a passive effect
 ## while carried (see Player). "note": shown when picked up. "pool": false keeps it out of
 ## random rolls (it is obtained some other way).
 ## "shape" (box if missing): see LootShapes.
@@ -208,7 +208,7 @@ static func prompt(data: Dictionary) -> String:
 		if TAG_NAMES.has(tag):
 			tags += "　" + TAG_NAMES[tag]
 	if USE_NAMES.has(data.get("use", "")):
-		tags += "　R " + USE_NAMES[data.use]
+		tags += "　X " + USE_NAMES[data.use]
 	return "[E] 撿起 %s　$%d　%.1fkg%s" % [data.get("name", "?"), data.get("value", 0), data.get("weight", 0.0), tags]
 
 

@@ -139,7 +139,7 @@ func roll_loot() -> Array:
 	return result
 
 
-## A line for the local player's HUD (body heat on the ice station), or "".
+## A line for the local player's HUD (the last train coming, the dream's clarity), or "".
 func status_text() -> String:
 	return ""
 
@@ -212,7 +212,7 @@ func _add_gate(pos: Vector3, size: Vector3) -> void:
 ## Axis-aligned wall from `from` to `to` (same x or same z; from.y is its base), with
 ## openings given as [distance along the wall to the opening's centre, width, height].
 func _wall(from: Vector3, to: Vector3, height: float, texture: String, openings := [],
-		thickness := 0.2, tint := Color.WHITE, layer := Layers.WORLD) -> void:
+		thickness := 0.2, tint := Color.WHITE, layer := Layers.WORLD, density := 0.5) -> void:
 	var length := from.distance_to(to)
 	var dir := (to - from) / length
 	var sorted := openings.duplicate()
@@ -222,19 +222,19 @@ func _wall(from: Vector3, to: Vector3, height: float, texture: String, openings 
 		var start: float = opening[0] - opening[1] / 2.0
 		var end: float = opening[0] + opening[1] / 2.0
 		if start > cursor + 0.01:
-			_wall_piece(from, dir, cursor, start, 0.0, height, thickness, texture, tint, layer)
+			_wall_piece(from, dir, cursor, start, 0.0, height, thickness, texture, tint, layer, density)
 		if opening[2] < height - 0.01:
-			_wall_piece(from, dir, start, end, opening[2], height, thickness, texture, tint, layer)
+			_wall_piece(from, dir, start, end, opening[2], height, thickness, texture, tint, layer, density)
 		cursor = end
 	if cursor < length - 0.01:
-		_wall_piece(from, dir, cursor, length, 0.0, height, thickness, texture, tint, layer)
+		_wall_piece(from, dir, cursor, length, 0.0, height, thickness, texture, tint, layer, density)
 
 
 func _wall_piece(from: Vector3, dir: Vector3, a: float, b: float, y0: float, y1: float,
-		thickness: float, texture: String, tint: Color, layer: int) -> void:
+		thickness: float, texture: String, tint: Color, layer: int, density := 0.5) -> void:
 	var center := from + dir * (a + b) / 2.0 + Vector3.UP * (y0 + y1) / 2.0
 	var size := Vector3(b - a, y1 - y0, thickness) if absf(dir.x) > 0.5 else Vector3(thickness, y1 - y0, b - a)
-	_box(size, center, texture, Vector3.ZERO, layer, tint)
+	_box(size, center, texture, Vector3.ZERO, layer, tint, density)
 
 
 ## A roof the guardian's overview camera can see through.
@@ -244,7 +244,7 @@ func _roof(size: Vector3, pos: Vector3, texture: String, tint := Color.WHITE) ->
 	return node
 
 
-## A glowing strip: neon signs, warning lamps, the snowcat's headlights.
+## A glowing strip: neon signs, warning lamps, a train's headlights.
 func _glow(size: Vector3, pos: Vector3, color: Color) -> Node3D:
 	var node := _box(size, pos, "concrete", Vector3.ZERO, 0)
 	node.get_child(0).material_override = PS1Materials.get_material(
@@ -417,7 +417,7 @@ func _build_wings() -> void:
 ## A core wall with doorways (and a floor across the wall's thickness) wherever a
 ## planned wing has a port on it.
 func _wall_with_ports(from: Vector3, to: Vector3, height: float, texture: String, thickness := 0.2,
-		tint := Color.WHITE, openings := []) -> void:
+		tint := Color.WHITE, openings := [], density := 0.5) -> void:
 	var cut := openings.duplicate()
 	var length := from.distance_to(to)
 	var dir := (to - from) / length
@@ -433,7 +433,7 @@ func _wall_with_ports(from: Vector3, to: Vector3, height: float, texture: String
 			var sill := Vector3(RoomGrid.DOOR_WIDE.x, 1.0, thickness + 1.2) if absf(dir.x) > 0.5 \
 				else Vector3(thickness + 1.2, 1.0, RoomGrid.DOOR_WIDE.x)
 			_box(sill, Vector3(from.x, 0, from.z) + dir * along + Vector3(0, -0.5, 0), texture, Vector3.ZERO, Layers.WORLD, tint)
-	_wall(from, to, height, texture, cut, thickness, tint)
+	_wall(from, to, height, texture, cut, thickness, tint, Layers.WORLD, density)
 
 
 func _light(pos: Vector3, color: Color, energy: float, light_range: float, flicker: bool) -> OmniLight3D:

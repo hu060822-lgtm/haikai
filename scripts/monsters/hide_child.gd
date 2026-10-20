@@ -178,6 +178,29 @@ func _tagged(player: Player) -> void:
 	_leave()
 
 
+## Host: a weapon hit it. Nothing hurts it; it's a game. Shooting at it while it hides
+## is cheating, and it tells on everyone. While it seeks, a shot is "you're it!": it
+## giggles and runs off to hide again, which buys you time.
+func on_hit(hit: Dictionary) -> float:
+	var attacker: Player = hit.get("attacker") as Player
+	match state:
+		State.HIDE:
+			if attacker != null:
+				MonsterKit.tell(attacker, &"remote_warn", ["「你作弊！」小孩大聲喊出每個人的位置…", 0.4])
+			_play.rpc("giggle", 0.6)
+			for other in MonsterKit.active_players(get_tree()):
+				GameNoise.emit(get_tree(), other.global_position, REVEAL_RADIUS, GameNoise.Kind.VOICE)
+			_leave()
+		State.SEEK:
+			if attacker != null:
+				MonsterKit.tell(attacker, &"remote_warn", ["「哈哈，換你當鬼！」小孩跑去躲起來了。", 0.0])
+			_play.rpc("giggle", 1.4)
+			_hide()
+		_:
+			_play.rpc("giggle", 1.2)
+	return 0.0
+
+
 ## Host: a weapon got it. It isn't hurt; it just runs off to play elsewhere for a while.
 func host_kill() -> void:
 	_play.rpc("giggle", 1.6)

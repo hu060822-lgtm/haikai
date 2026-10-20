@@ -150,6 +150,41 @@ func _think(delta: float) -> void:
 				state = State.WANDER
 
 
+## Host: a weapon hit it. From the front the cart takes the shot (and something spills
+## out of it); from behind or the side it is only a stooped old body. Either way it
+## comes for whoever shot it.
+func on_hit(hit: Dictionary) -> float:
+	var from: Vector3 = hit.get("from", global_position)
+	var attacker: Player = hit.get("attacker") as Player
+	if attacker != null and attacker.is_active() and state != State.CONTENT:
+		_target = attacker
+		state = State.CHASE
+		_since_seen = 0.0
+	var to := from - global_position
+	to.y = 0.0
+	if to.length() > 0.01 and (-global_basis.z).dot(to.normalized()) > 0.35:
+		_play.rpc("clank")
+		if not carried.is_empty() and Run.instance != null:
+			var spill: Dictionary = carried.pop_back()
+			cart_load = carried.size()
+			Run.instance.host_spawn_loot(spill, global_position - global_basis.z * 1.1 + Vector3.UP * 0.6, rng.randf_range(0, TAU), false)
+		return 0.3
+	return 1.4
+
+
+## Host: dead. The cart tips over and everything in it rolls out.
+func host_kill() -> void:
+	if is_queued_for_deletion():
+		return
+	var run := Run.instance
+	if run != null:
+		for data in carried:
+			run.host_spawn_loot(data, global_position + Vector3(rng.randf_range(-0.8, 0.8), 0.4, rng.randf_range(-0.8, 0.8)), rng.randf_range(0, TAU))
+	carried.clear()
+	_play.rpc("clank")
+	queue_free()
+
+
 func _spot_player() -> Player:
 	var eye := global_position + Vector3.UP * 1.5
 	var best: Player = null

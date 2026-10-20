@@ -2,7 +2,8 @@ class_name Moth
 extends Node3D
 ## 撲燈蛾: a moth the size of a hand. Dominates by ABILITY: it flies straight at any lit
 ## lantern, beats it out, then screams loud enough to bring every monster nearby.
-## Weakness players can learn: with the lantern off it has nothing to fly at.
+## A light bolted under a gun barrel draws it just the same.
+## Weakness players can learn: with the lantern (and gun light) off it has nothing to fly at.
 
 const FLY_SPEED := 4.2
 const WANDER_SPEED := 1.2
@@ -81,8 +82,22 @@ func _think(delta: float) -> void:
 		look_at(global_position + step, Vector3.UP)
 
 
+## Host: a weapon hit it (a moth is one hit from dead). If it lives, it comes straight
+## for the shooter's light.
+func on_hit(hit: Dictionary) -> float:
+	var attacker: Player = hit.get("attacker") as Player
+	if attacker != null and light_on(attacker) and not resting:
+		_target = attacker
+	return 1.0
+
+
+## A player's light it can fly at: the lantern, or a light under the gun barrel.
+static func light_on(player: Player) -> bool:
+	return player.lantern_on or player.get("gun_light_on") == true
+
+
 func _wants(player: Player) -> bool:
-	return player.is_active() and player.lantern_on \
+	return player.is_active() and light_on(player) \
 		and global_position.distance_to(player.head_position()) < NOTICE_RANGE * 1.3 \
 		and MonsterKit.clear_line(get_world_3d(), global_position, player.head_position())
 
@@ -91,7 +106,7 @@ func _find_lantern() -> Player:
 	var best: Player = null
 	var best_distance := NOTICE_RANGE
 	for player in MonsterKit.active_players(get_tree()):
-		if not player.lantern_on:
+		if not light_on(player):
 			continue
 		var distance := global_position.distance_to(player.head_position())
 		if distance < best_distance and MonsterKit.clear_line(get_world_3d(), global_position, player.head_position()):
