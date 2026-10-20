@@ -34,9 +34,7 @@ func _ready() -> void:
 
 	var size: Vector3 = data.size
 	var mesh_instance := MeshInstance3D.new()
-	var box := BoxMesh.new()
-	box.size = size
-	mesh_instance.mesh = box
+	mesh_instance.mesh = LootShapes.mesh_for(data)
 	mesh_instance.material_override = PS1Materials.get_material(data.texture, data.color, true)
 	add_child(mesh_instance)
 	var collider := CollisionShape3D.new()
@@ -70,12 +68,7 @@ func to_data() -> Dictionary:
 
 
 func get_prompt(_player: Player = null) -> String:
-	var tags := ""
-	if LootTable.has_tag(data, "fragile"):
-		tags += "　易碎"
-	if LootTable.has_tag(data, "noisy"):
-		tags += "　吵鬧"
-	return "[E] 撿起 %s　$%d　%.1fkg%s" % [item_name, value, weight, tags]
+	return LootTable.prompt(data)
 
 
 func interact(player: Player) -> void:

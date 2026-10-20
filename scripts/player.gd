@@ -38,6 +38,8 @@ const ADRENALINE_TIME := 10.0
 const ADRENALINE_CRASH_TIME := 10.0
 const SPRING_JUMP_MULT := 1.42  # sqrt(2): double jump height
 const VOICE_RATE := 11025.0
+const HOT_INTERVAL := 2.5
+const HOT_DAMAGE := 3.0
 
 var items: Array[Dictionary] = []
 var carried_weight := 0.0
@@ -89,6 +91,8 @@ var _shake := 0.0
 var _adrenaline := 0.0
 var _crash := 0.0
 var _weapon_cooldown := 0.0
+var _bitten := 0.0
+var _hot_timer := HOT_INTERVAL
 
 
 func _ready() -> void:
@@ -252,6 +256,47 @@ func _build_body() -> void:
 	_body.add_child(_name_label)
 
 
+## Where this player is looking. Valid on every peer: the head rotation is replicated.
+func look_direction() -> Vector3:
+	return -_head.global_basis.z
+
+
+## Host -> owner: something hurt this player.
+@rpc("any_peer", "call_local", "reliable")
+func remote_damage(amount: float, cause: String, note := "") -> void:
+	if not _from_host():
+		return
+	take_damage(amount, cause)
+	if note != "" and not is_dead:
+		message.emit(note)
+
+
+## Host -> owner: a moth put the lantern out.
+@rpc("any_peer", "call_local", "reliable")
+func remote_snuff() -> void:
+	if not _from_host() or not lantern_on:
+		return
+	set_lantern(false)
+	add_shake(0.2)
+	message.emit("有東西撲滅了你的提燈！（F 重新點亮）")
+
+
+## Host -> owner: a mimic bit this player's hand.
+@rpc("any_peer", "call_local", "reliable")
+func remote_bitten(seconds: float, damage: float) -> void:
+	if not _from_host():
+		return
+	_bitten = seconds
+	take_damage(damage, "被擬態蟲咬死了")
+	if not is_dead:
+		message.emit("那不是寶物！它咬住你的手了，%d 秒內用不了武器和道具" % int(seconds))
+
+
+func _from_host() -> bool:
+	var sender := multiplayer.get_remote_sender_id()
+	return sender == 0 or sender == 1
+
+
 func is_active() -> bool:
 	return not is_dead and not extracted
 
@@ -275,10 +320,8 @@ func can_carry(data: Dictionary) -> bool:
 ## The host tells the owner they were caught by something.
 @rpc("any_peer", "call_local", "reliable")
 func remote_die(cause: String) -> void:
-	var sender := multiplayer.get_remote_sender_id()
-	if sender != 0 and sender != 1:
-		return
-	die(cause)
+	if _from_host():
+		die(cause)
 
 
 func _process(delta: float) -> void:
@@ -369,6 +412,7 @@ func _physics_process(delta: float) -> void:
 		return
 
 	_weapon_cooldown = maxf(_weapon_cooldown - delta, 0.0)
+	_bitten = maxf(_bitten - delta, 0.0)
 	_update_boost_timers(delta)
 	var climbing := _ladders > 0
 
@@ -479,6 +523,9 @@ func set_lantern(on: bool) -> void:
 func use_weapon() -> void:
 	if weapon_id == "" or _weapon_cooldown > 0.0:
 		return
+	if _bitten > 0.0:
+		message.emit("手被咬住了，用不了武器！")
+		return
 	match weapon_id:
 		"crowbar":
 			_weapon_cooldown = 0.6
@@ -501,6 +548,9 @@ func use_weapon() -> void:
 
 
 func use_boost() -> void:
+	if _bitten > 0.0:
+		message.emit("手被咬住了，用不了道具！")
+		return
 	if "adrenaline" in boosts:
 		boosts.erase("adrenaline")
 		_adrenaline = ADRENALINE_TIME
@@ -573,6 +623,7 @@ func _update_footsteps(delta: float, moving: bool, sprinting: bool) -> void:
 
 
 func _update_noisy_items(delta: float) -> void:
+	_update_hot_items(delta)
 	var noisy := 0
 	for item in items:
 		if LootTable.has_tag(item, "noisy"):
@@ -584,6 +635,21 @@ func _update_noisy_items(delta: float) -> void:
 		_noisy_timer = NOISY_ITEM_INTERVAL / noisy
 		GameNoise.emit(get_tree(), global_position, NOISY_ITEM_RADIUS, GameNoise.Kind.ITEM)
 		Sfx.play_3d(get_parent(), global_position, "tink", -16.0, 15.0, randf_range(0.6, 1.4))
+
+
+## Hot items (a glowing coal) burn a little every couple of seconds while carried.
+func _update_hot_items(delta: float) -> void:
+	var hot := 0
+	for item in items:
+		if LootTable.has_tag(item, "hot"):
+			hot += 1
+	if hot == 0:
+		_hot_timer = HOT_INTERVAL
+		return
+	_hot_timer -= delta
+	if _hot_timer <= 0.0:
+		_hot_timer = HOT_INTERVAL
+		take_damage(HOT_DAMAGE * hot, "被滾燙的煤塊燙死了")
 
 
 func _recalculate() -> void:

@@ -10,7 +10,7 @@ var _sounded := false
 
 func _ready() -> void:
 	collision_layer = 0
-	collision_mask = Layers.WORLD | Layers.WALKWAY | Layers.MONSTER
+	collision_mask = Layers.WORLD | Layers.WALKWAY | Layers.MONSTER | Layers.LOOT
 	mass = 0.05
 	continuous_cd = true
 	contact_monitor = true
@@ -33,9 +33,11 @@ func _ready() -> void:
 	get_tree().create_timer(8.0).timeout.connect(queue_free)
 
 
-func _on_body_entered(_body: Node) -> void:
+func _on_body_entered(body: Node) -> void:
 	if _sounded:
 		return
 	_sounded = true
+	if body.has_method("weapon_hit"):
+		body.weapon_hit()
 	Sfx.play_3d(get_parent(), global_position, "tink", 2.0, 45.0)
 	GameNoise.emit(get_tree(), global_position, NOISE_RADIUS, GameNoise.Kind.IMPACT)

@@ -41,14 +41,21 @@ func _run() -> void:
 	main.session.leave()
 
 	main.show_menus = false
+	Run.forced_monsters = ["colossus", "mannequin", "moth", "mimic"]
 	main.start_run({"weapon": "crowbar", "boosts": ["adrenaline"]})
 	for i in 30:
 		await process_frame
 	main.colossus.process_mode = Node.PROCESS_MODE_DISABLED
+	var extras := []
+	for node in main.run.monsters_root.get_children():
+		if node is Node3D and node != main.colossus:
+			node.process_mode = Node.PROCESS_MODE_DISABLED
+			extras.append(node)
+			node.global_position = Vector3(0, -50, -100)
 	for shot in SHOTS:
 		main.player.global_position = shot.pos
 		main.player.rotation.y = shot.yaw
-		main.player.get_child(1).rotation.x = shot.pitch
+		main.player.get_node("Head").rotation.x = shot.pitch
 		main.player.velocity = Vector3.ZERO
 		main.colossus.global_position = shot.get("monster", Vector3(0, 0, -100))
 		main.colossus.rotation.y = PI
@@ -65,11 +72,58 @@ func _run() -> void:
 	mate.rotation.y = PI * 0.85
 	main.player.global_position = Vector3(4.0, 0.1, 19.0)
 	main.player.rotation.y = 0.0
-	main.player.get_child(1).rotation.x = 0.0
+	main.player.get_node("Head").rotation.x = 0.0
 	main.hud.set_voice("speaking")
 	for i in 20:
 		await process_frame
 	_save(out_dir, "teammate")
+
+	mate.queue_free()
+	main.hud.set_voice("")
+	# The new monsters, one at a time, in front of the camera.
+	var player: Player = main.player
+	player.global_position = Vector3(4.0, 0.1, 19.0)
+	player.rotation.y = 0.0
+	var done := {}
+	for node in extras:
+		var shot := ""
+		if node is Mannequin:
+			node.global_position = Vector3(4.3, 0.05, 16.2)
+			node.rotation.y = 0.2
+			node.pose = 1
+			shot = "mannequin"
+		elif node is Moth:
+			node.global_position = Vector3(3.8, 1.6, 17.6)
+			node.rotation.y = 0.6
+			shot = "moth"
+		elif node is Mimic:
+			node.global_position = Vector3(4.0, 0.05, 17.9)
+			node.rotation.y = 0.9
+			node.disguised = false
+			shot = "mimic"
+		if shot != "" and not done.has(shot):
+			done[shot] = true
+			player.get_node("Head").rotation.x = -0.6 if shot == "mimic" else -0.05
+			for i in 15:
+				await process_frame
+			_save(out_dir, shot)
+		node.global_position = Vector3(0, -50, -100)
+
+	# A row of loot, to show off the shapes.
+	player.global_position = Vector3(4.0, 0.1, 19.0)
+	player.rotation.y = 0.0
+	player.get_node("Head").rotation.x = -0.55
+	var picks := [12, 19, 34, 40, 53, 60, 69, 72, 84, 98, 57, 93]
+	var index := 0
+	for item in LootTable.ITEMS:
+		if item.id in picks:
+			var x := 3.0 + (index % 6) * 0.4
+			var z := 17.0 - (index / 6) * 0.6
+			main.run.host_spawn_loot(item, Vector3(x, 0.4, z))
+			index += 1
+	for i in 30:
+		await process_frame
+	_save(out_dir, "loot")
 
 	var result := ResultScreen.new()
 	result.survived = true
