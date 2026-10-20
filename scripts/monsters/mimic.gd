@@ -130,7 +130,7 @@ func _redisguise() -> void:
 	global_position = spot.pos
 	rotation = Vector3(0, spot.rot, 0)
 	velocity = Vector3.ZERO
-	disguise = LootTable.roll(rng, 0.8)
+	disguise = LootTable.roll(rng, 0.8, Run.instance.level.loot_pool if Run.instance != null else [])
 	disguised = true
 	hidden = false
 

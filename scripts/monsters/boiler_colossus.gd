@@ -47,6 +47,8 @@ var enraged := false:
 			_eye_light.light_color = Color(1.0, 0.2, 0.05)
 var patrol_points: Array[Vector3] = []
 var rng := RandomNumberGenerator.new()
+## Replicated: someone already wrenched out the loose bolt (see ColossusBolt).
+var bolt_taken := false
 
 var _gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity")
 var _agent: NavigationAgent3D
@@ -92,6 +94,10 @@ func _ready() -> void:
 
 	_build_model()
 	_build_sync()
+	var bolt := ColossusBolt.new()
+	bolt.name = "Bolt"
+	bolt.colossus = self
+	add_child(bolt)
 	_vent_timer = rng.randf_range(VENT_INTERVAL_MIN, VENT_INTERVAL_MAX)
 
 
@@ -99,13 +105,21 @@ func _build_sync() -> void:
 	var sync := MultiplayerSynchronizer.new()
 	sync.name = "Sync"
 	var config := SceneReplicationConfig.new()
-	for path in [".:position", ".:rotation", ".:velocity", ".:state", ".:enraged"]:
+	for path in [".:position", ".:rotation", ".:velocity", ".:state", ".:enraged", ".:bolt_taken"]:
 		var node_path := NodePath(path)
 		config.add_property(node_path)
 		config.property_set_spawn(node_path, true)
 		config.property_set_replication_mode(node_path, SceneReplicationConfig.REPLICATION_MODE_ALWAYS)
 	sync.replication_config = config
 	add_child(sync)
+
+
+## Host: a player asked to pull the bolt out while it vents.
+func host_action(action: String, player: Player) -> void:
+	if action == "bolt" and state == State.VENT and not bolt_taken and player != null and Run.instance != null:
+		bolt_taken = true
+		Run.instance.host_give(player, LootTable.make(94))
+		Sfx.play_3d(get_parent(), global_position + Vector3.UP * 1.5, "clank", 4.0, 40.0, 0.5)
 
 
 ## Called by the level when the boiler restarts: everything is awake now.

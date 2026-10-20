@@ -18,6 +18,7 @@ var _extract_label: Label
 var _message: Label
 var _help: Label
 var _voice: Label
+var _readout: Label
 var _vignette: ColorRect
 var _message_timer := 0.0
 var _player: Player
@@ -57,7 +58,13 @@ func _ready() -> void:
 	_gear.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_gear.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 
-	_help = _label("WASD 移動　Shift 衝刺　Ctrl 蹲下　空白 跳　E 撿起/互動　G 丟下　F 提燈　左鍵 武器　Q 強化", 15, Control.PRESET_CENTER_BOTTOM)
+	_readout = _label("", 18, Control.PRESET_BOTTOM_RIGHT)
+	_readout.position += Vector2(-24.0, -160.0)
+	_readout.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_readout.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_readout.add_theme_color_override("font_color", Color(0.6, 1.0, 0.7))
+
+	_help = _label("WASD 移動　Shift 衝刺　Ctrl 蹲下　空白 跳　E 撿起/互動　G 丟下　F 提燈　左鍵 武器　Q 強化　R 用物品", 15, Control.PRESET_CENTER_BOTTOM)
 	_help.position.y -= 30.0
 	_help.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	_help.modulate.a = 0.5
@@ -88,6 +95,7 @@ func bind_player(player: Player) -> void:
 	player.inventory_changed.connect(_on_inventory_changed)
 	player.gear_changed.connect(_on_gear_changed)
 	player.message.connect(show_message)
+	player.readout_changed.connect(func(text: String) -> void: _readout.text = text)
 	_on_inventory_changed(player.items, player.carried_weight, player.carried_value)
 	_on_gear_changed()
 
@@ -148,7 +156,11 @@ func _on_health_changed(ratio: float) -> void:
 
 
 func _on_inventory_changed(items: Array, weight: float, value: int) -> void:
-	_inventory.text = "背包 %d 件　%.1f / %.0f kg　價值 $%d" % [items.size(), weight, Player.MAX_CARRY_WEIGHT, value]
+	_inventory.text = "背包 %d 件　%.1f / %.0f kg　價值 $%d" % [items.size(), weight, Player.max_carry(_player), value]
+	for i in range(items.size() - 1, -1, -1):
+		if items[i].has("use"):
+			_inventory.text += "\nR：%s（%s）" % [items[i].name, LootTable.USE_NAMES.get(items[i].use, "使用")]
+			break
 
 
 func _on_gear_changed() -> void:

@@ -29,6 +29,8 @@ var monster_spawn := Vector3.ZERO
 var patrol_points: Array[Vector3] = []
 var loot_spots: Array[Vector3] = []
 var loot_count := Vector2i(14, 18)
+## This run's item pool (LootTable.make_pool), set by the host before loot is rolled.
+var loot_pool: Array = []
 ## Where the guardian may release monsters: x/z half extents and a height range.
 var bounds := AABB(Vector3(-16, -0.5, -22), Vector3(32, 7.5, 44))
 ## The guardian's top-down camera sits this high: just under the roof.
@@ -118,7 +120,7 @@ func roll_loot() -> Array:
 		spots[j] = tmp
 	var result := []
 	for i in mini(rng.randi_range(loot_count.x, loot_count.y), spots.size()):
-		result.append({"item": LootTable.roll(rng), "pos": spots[i], "rot": rng.randf_range(0.0, TAU)})
+		result.append({"item": LootTable.roll(rng, 0.0, loot_pool), "pos": spots[i], "rot": rng.randf_range(0.0, TAU)})
 	return result
 
 

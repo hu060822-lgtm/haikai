@@ -32,6 +32,7 @@ var local_player: Player
 var colossus: BoilerColossus
 var monster_kinds: Array[String] = []
 var field: FieldControl
+var warp: TimeWarp
 var director: Director
 var is_guardian := false
 var time_left := MATCH_TIME
@@ -71,6 +72,10 @@ func _ready() -> void:
 	for i in level.lockers.size():
 		var index := i
 		level.lockers[i].interact_requested.connect(func() -> void: _to_host(&"_pry_locker", [index]))
+
+	warp = TimeWarp.new()
+	warp.name = "Warp"
+	add_child(warp)
 
 	field = FieldControl.new()
 	field.name = "Field"
@@ -141,6 +146,7 @@ func _host_populate() -> void:
 		director.run = self
 		director.rng.seed = rng.randi()
 		add_child(director)
+	level.loot_pool = LootTable.make_pool(rng)
 	var loot := level.roll_loot()
 	for entry in loot:
 		host_spawn_loot(entry.item, entry.pos, entry.rot, true)
@@ -178,7 +184,7 @@ func _host_spawn_monsters() -> void:
 					var spot: Dictionary = spots[serial % spots.size()]
 					data.pos = spot.pos
 					data.rot = spot.rot
-					data.disguise = LootTable.roll(rng, 0.8)
+					data.disguise = LootTable.roll(rng, 0.8, level.loot_pool)
 			_monster_spawner.spawn(data)
 
 
@@ -211,7 +217,7 @@ func host_release_monster(kind: String, pos: Vector3) -> void:
 			data.pos = pos + Vector3.UP * 1.5
 		"mimic":
 			data.rot = rng.randf_range(0.0, TAU)
-			data.disguise = LootTable.roll(rng, 0.8)
+			data.disguise = LootTable.roll(rng, 0.8, level.loot_pool)
 	_monster_spawner.spawn(data)
 	_monster_released.rpc(pos)
 
@@ -364,6 +370,7 @@ func _spawn_monster(data: Dictionary) -> Node:
 			monster = giant
 	monster.name = data.name
 	monster.position = data.pos
+	monster.set_meta("kind", data.type)
 	return monster
 
 
@@ -430,6 +437,43 @@ func _monster_action(monster_name: String, action: String) -> void:
 	monster.host_action(action, players_root.get_node_or_null(str(_sender())) as Player)
 
 
+## Host: hand a player an item directly (a monster's prize, a button's gift).
+func host_give(player: Player, data: Dictionary) -> void:
+	_send_to(player.get_multiplayer_authority(), &"_grant_item", [data, player.global_position])
+
+
+## A player used a piece of loot whose effect the host has to carry out.
+func request_item_effect(effect: String, pos: Vector3) -> void:
+	_to_host(&"_item_effect", [effect, pos])
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _item_effect(effect: String, pos: Vector3) -> void:
+	if not _is_host():
+		return
+	var player := players_root.get_node_or_null(str(_sender())) as Player
+	match effect:
+		"hourglass":
+			for monster in monsters_root.get_children():
+				if monster is Node3D and monster.global_position.distance_to(pos) < 10.0:
+					TimeWarp.slow(monster, 5.0)
+		"button":
+			if player == null:
+				return
+			var kinds := ["heal", "gift", "alarm", "teleport", "dark"]
+			var kind: String = kinds[rng.randi_range(0, kinds.size() - 1)]
+			var at := pos
+			match kind:
+				"gift":
+					host_spawn_loot(LootTable.roll(rng, 3.0), pos + Vector3.UP * 0.6, 0.0, false)
+				"alarm":
+					Sfx.play_3d(self, pos, "whistle", 6.0, 60.0, 1.5)
+					GameNoise.emit_local(get_tree(), pos, 45.0, GameNoise.Kind.MACHINE)
+				"teleport":
+					at = level.random_patrol_point() + Vector3.UP * 0.2
+			MonsterKit.tell(player, &"remote_event", [kind, at])
+
+
 @rpc("any_peer", "call_local", "reliable")
 func _pull_lever() -> void:
 	if _is_host() and not level.lever.is_pulled:
@@ -454,7 +498,7 @@ func _pry_locker(index: int) -> void:
 	_locker_opened.rpc(index)
 	for i in rng.randi_range(1, 2):
 		var pos := locker.to_global(Vector3(-0.2 + 0.4 * i, 0.2, 0.6))
-		host_spawn_loot(LootTable.roll(rng, Locker.LUCK), pos)
+		host_spawn_loot(LootTable.roll(rng, Locker.LUCK, level.loot_pool), pos)
 
 
 @rpc("authority", "call_local", "reliable")

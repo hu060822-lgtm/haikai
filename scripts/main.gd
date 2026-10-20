@@ -38,6 +38,7 @@ var _warned := false
 var _spectating: Player = null
 var _spectate_label: Label
 var _voice: VoiceChat
+var _post: ShaderMaterial
 
 
 func _ready() -> void:
@@ -157,6 +158,7 @@ func _on_run_requested(seed: int, roster: Dictionary) -> void:
 	var post_material := ShaderMaterial.new()
 	post_material.shader = POST_SHADER
 	post_rect.material = post_material
+	_post = post_material
 	post_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	post_layer.add_child(post_rect)
 	_viewport.add_child(post_layer)
@@ -213,12 +215,31 @@ func _process(_delta: float) -> void:
 		return
 	hud.set_time_left(run.time_left)
 	hud.set_status(run.level.status_text())
+	_update_post()
 	if run_active and not _warned and run.time_left <= WARNING_TIME:
 		_warned = true
 		hud.show_message(run.level.warning_message, 5.0)
 	if _spectating != null and not is_instance_valid(_spectating):
 		_spectating = null
 		_spectate_next()
+
+
+## Screen effects from the local player's state: dreaminess, colour, night vision.
+func _update_post() -> void:
+	if _post == null:
+		return
+	var local := player
+	var dream := 0.0
+	var saturation := 1.0
+	var gain := 1.0
+	if local != null and is_instance_valid(local):
+		dream = local.dream
+		saturation = local.view_saturation()
+		gain = local.view_gain()
+	_post.set_shader_parameter("dream", dream)
+	_post.set_shader_parameter("saturation", saturation)
+	_post.set_shader_parameter("gain", gain)
+	_post.set_shader_parameter("night_vision", gain > 1.01)
 
 
 func _physics_process(_delta: float) -> void:

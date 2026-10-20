@@ -13,6 +13,7 @@ const BINDINGS := {
 	"lantern": [KEY_F],
 	"drop": [KEY_G],
 	"use_boost": [KEY_Q],
+	"use_item": [KEY_R],
 	"toggle_mic": [KEY_M],
 }
 
