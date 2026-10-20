@@ -7,6 +7,10 @@ extends Node3D
 signal local_player_spawned(player: Player)
 signal local_finished(result: Dictionary)
 signal colossus_spawned(colossus: BoilerColossus)
+## Guardian's machine only: live energy, cooldowns and loot extracted so far.
+signal guardian_state(energy: float, cooldowns: Dictionary, extracted: int)
+signal guardian_ping(position: Vector3, radius: float)
+signal power_changed(on: bool)
 
 const MATCH_TIME := 720.0
 const BODY_SCATTER := 0.6
@@ -14,6 +18,8 @@ const BODY_SCATTER := 0.6
 static var instance: Run
 ## Tests pin the monster kinds; empty means a random draw (see MonsterRoster).
 static var forced_monsters: Array = []
+## Tests switch the AI director off so it doesn't meddle.
+static var director_enabled := true
 
 var seed := 0
 var roster := {}
@@ -22,6 +28,9 @@ var level: BoilerFactory
 var local_player: Player
 var colossus: BoilerColossus
 var monster_kinds: Array[String] = []
+var field: FieldControl
+var director: Director
+var is_guardian := false
 var time_left := MATCH_TIME
 var finished := false
 var rng := RandomNumberGenerator.new()
@@ -33,7 +42,9 @@ var _player_spawner: MultiplayerSpawner
 var _monster_spawner: MultiplayerSpawner
 var _loot_spawner: MultiplayerSpawner
 var _loot_counter := 0
+var _monster_serial := 0
 var _time_broadcast := 0.0
+var _guardian_broadcast := 0.0
 
 
 func _enter_tree() -> void:
@@ -57,6 +68,12 @@ func _ready() -> void:
 		var index := i
 		level.lockers[i].interact_requested.connect(func() -> void: _to_host(&"_pry_locker", [index]))
 
+	field = FieldControl.new()
+	field.name = "Field"
+	field.run = self
+	add_child(field)
+	is_guardian = roster.get(multiplayer.get_unique_id(), {}).get("role", "") == "guardian"
+
 	players_root = _root("Players")
 	monsters_root = _root("Monsters")
 	loot_root = _root("Loot")
@@ -67,6 +84,10 @@ func _ready() -> void:
 	var session := Session.instance
 	if _is_host():
 		session.world_ready_all.connect(_host_populate, CONNECT_ONE_SHOT)
+		field.pinged.connect(func(pos: Vector3, radius: float) -> void:
+			var guardian := Session.instance.guardian_id()
+			if guardian != 0:
+				_send_to(guardian, &"_guardian_ping", [pos, radius]))
 		multiplayer.peer_disconnected.connect(func(id: int) -> void:
 			var gone := players_root.get_node_or_null(str(id))
 			if gone != null:
@@ -87,6 +108,11 @@ func _process(delta: float) -> void:
 		if _time_broadcast <= 0.0:
 			_time_broadcast = 1.0
 			Session.instance.broadcast_time(time_left)
+		_guardian_broadcast -= delta
+		var guardian := Session.instance.guardian_id()
+		if guardian != 0 and _guardian_broadcast <= 0.0:
+			_guardian_broadcast = 0.25
+			_send_to(guardian, &"_guardian_state", [field.energy, field.cooldowns, Session.instance.extracted_total])
 
 
 func all_players() -> Array[Player]:
@@ -101,9 +127,16 @@ func all_players() -> Array[Player]:
 
 func _host_populate() -> void:
 	var index := 0
-	for id in roster:
+	for id in Session.instance.scavenger_ids():
 		_player_spawner.spawn({"id": id, "name": roster[id].name, "index": index})
 		index += 1
+	if Session.instance.guardian_id() == 0 and director_enabled:
+		director = Director.new()
+		director.name = "Director"
+		director.field = field
+		director.run = self
+		director.rng.seed = rng.randi()
+		add_child(director)
 	var loot := level.roll_loot()
 	for entry in loot:
 		host_spawn_loot(entry.item, entry.pos, entry.rot, true)
@@ -117,11 +150,11 @@ func _host_spawn_monsters() -> void:
 	else:
 		monster_kinds.assign(forced_monsters)
 	var spots := level.roll_loot()
-	var serial := 0
 	for kind in monster_kinds:
 		var count_range: Array = MonsterRoster.MONSTERS[kind].count
 		for i in rng.randi_range(count_range[0], count_range[1]):
-			serial += 1
+			_monster_serial += 1
+			var serial := _monster_serial
 			var data := {"type": kind, "name": "%s%d" % [kind.capitalize(), serial], "seed": rng.randi()}
 			match kind:
 				"colossus":
@@ -137,6 +170,75 @@ func _host_spawn_monsters() -> void:
 					data.rot = spot.rot
 					data.disguise = LootTable.roll(rng, 0.8)
 			_monster_spawner.spawn(data)
+
+
+## Field control (host): the guardian or director closed a gate, cut power, released a monster.
+func host_set_gate(index: int, closed: bool) -> void:
+	_gate_set.rpc(index, closed)
+
+
+@rpc("authority", "call_local", "reliable")
+func _gate_set(index: int, closed: bool) -> void:
+	if index >= 0 and index < level.gates.size():
+		level.gates[index].set_closed(closed)
+
+
+func host_set_power(on: bool) -> void:
+	_power_set.rpc(on)
+
+
+@rpc("authority", "call_local", "reliable")
+func _power_set(on: bool) -> void:
+	level.set_power(on)
+	power_changed.emit(on)
+
+
+func host_release_monster(kind: String, pos: Vector3) -> void:
+	_monster_serial += 1
+	var data := {"type": kind, "name": "%s%d" % [kind.capitalize(), _monster_serial], "seed": rng.randi(), "pos": pos}
+	match kind:
+		"moth":
+			data.pos = pos + Vector3.UP * 1.5
+		"mimic":
+			data.rot = rng.randf_range(0.0, TAU)
+			data.disguise = LootTable.roll(rng, 0.8)
+	_monster_spawner.spawn(data)
+	_monster_released.rpc(pos)
+
+
+@rpc("authority", "call_local", "reliable")
+func _monster_released(pos: Vector3) -> void:
+	Sfx.play_3d(self, pos, "hiss", -2.0, 25.0, 0.7)
+
+
+## Guardian's machine: ask the host to use a power. args: gate index, or [kind, position].
+func request_ability(ability: String, args := []) -> void:
+	_to_host(&"_ability", [ability, args])
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _ability(ability: String, args: Array) -> void:
+	if not _is_host() or _sender() != Session.instance.guardian_id():
+		return
+	match ability:
+		"gate":
+			if args.size() == 1:
+				field.use_gate(int(args[0]))
+		"power":
+			field.use_power()
+		"monster":
+			if args.size() == 2:
+				field.use_monster(str(args[0]), args[1])
+
+
+@rpc("authority", "call_local", "unreliable_ordered")
+func _guardian_state(energy: float, cooldowns: Dictionary, extracted: int) -> void:
+	guardian_state.emit(energy, cooldowns, extracted)
+
+
+@rpc("authority", "call_local", "unreliable")
+func _guardian_ping(pos: Vector3, radius: float) -> void:
+	guardian_ping.emit(pos, radius)
 
 
 ## The patrol point farthest from where players start.
@@ -322,7 +424,7 @@ func local_extracted() -> void:
 	var gear := local_player.remaining_gear()
 	local_player.set_extracted()
 	GameState.record_extraction(payout.total, gear)
-	Session.instance.report_finished()
+	Session.instance.report_finished(payout.total)
 	local_finished.emit({"survived": true, "items": payout.items_list, "payout": payout, "cause": "", "lost_gear": []})
 
 

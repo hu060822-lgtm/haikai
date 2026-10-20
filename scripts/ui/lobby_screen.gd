@@ -8,6 +8,7 @@ signal leave_requested()
 var _list: Label
 var _hint: Label
 var _start: Button
+var _role: Button
 
 
 func _ready() -> void:
@@ -34,10 +35,18 @@ func _ready() -> void:
 	_start.custom_minimum_size = Vector2(0, 54)
 	_start.add_theme_font_size_override("font_size", 22)
 	column.add_child(_start)
+	_role = UiKit.button("", _toggle_role)
+	column.add_child(_role)
 	column.add_child(UiKit.button("離開房間", func() -> void: leave_requested.emit()))
 
 	Session.instance.roster_changed.connect(_refresh)
 	_refresh()
+
+
+func _toggle_role() -> void:
+	var session := Session.instance
+	var me_guardian := session.role_of(session.local_id()) == "guardian"
+	session.request_role("scavenger" if me_guardian else "guardian")
 
 
 func _refresh() -> void:
@@ -47,12 +56,18 @@ func _refresh() -> void:
 	ids.sort()
 	for id in ids:
 		var tag := "（主機）" if id == 1 else ""
+		if session.role_of(id) == "guardian":
+			tag += "【守墓者】"
 		var you := "　← 你" if id == session.local_id() else ""
 		lines.append("%s%s%s" % [session.roster[id].name, tag, you])
 	_list.text = "\n".join(lines) if not lines.is_empty() else "連線中…"
 	_start.visible = session.is_host()
-	_start.disabled = session.roster.size() < 1
+	_start.disabled = session.scavenger_ids().is_empty()
+	var me_guardian := session.role_of(session.local_id()) == "guardian"
+	var taken := session.guardian_id() != 0 and not me_guardian
+	_role.text = "改當搜刮者" if me_guardian else ("已經有人當守墓者了" if taken else "我要當守墓者（在機房操控整座工廠）")
+	_role.disabled = taken
 	if session.is_host():
-		_hint.text = "朋友在「加入房間」輸入你的 IP 就能進來（埠 %d，最多 %d 人）。人到齊了按開始。" % [Session.PORT, Session.MAX_PLAYERS]
+		_hint.text = "朋友在「加入房間」輸入你的 IP 就能進來（埠 %d，最多 %d 人）。人到齊了按開始。沒人當守墓者時由 AI 代打。" % [Session.PORT, Session.MAX_PLAYERS]
 	else:
 		_hint.text = "等主機按開始。"

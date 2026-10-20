@@ -9,6 +9,9 @@ var cause := ""
 var items: Array = []
 var payout := {}
 var lost_gear: Array = []
+## From the session: {extracted, threshold, guardian_won, guardian}.
+var summary := {}
+var as_guardian := false
 
 
 func _ready() -> void:
@@ -25,7 +28,12 @@ func _ready() -> void:
 	column.custom_minimum_size = Vector2(640, 0)
 	column.position -= Vector2(320, 260)
 
-	if survived:
+	if as_guardian:
+		var won: bool = summary.get("guardian_won", false)
+		column.add_child(UiKit.label("守墓者勝利" if won else "他們逃掉了", 52, Color(0.55, 0.8, 1.0) if won else Color(0.9, 0.4, 0.3)))
+		column.add_child(UiKit.label("搜刮者撤出 $%d，門檻 $%d" % [summary.get("extracted", 0), summary.get("threshold", 0)], 24))
+		column.add_child(UiKit.label("守墓者報酬 +$%d" % (GameState.GUARDIAN_WIN_REWARD if won else GameState.GUARDIAN_LOSS_REWARD), 22, UiKit.ACCENT))
+	elif survived:
 		column.add_child(UiKit.label("撤離成功", 52, Color(0.55, 0.95, 0.6)))
 		if items.is_empty():
 			column.add_child(UiKit.label("空手而回。至少你還活著。", 20))
@@ -48,6 +56,12 @@ func _ready() -> void:
 				names.append(Gear.info(id).name)
 			column.add_child(UiKit.label("失去的裝備：" + "、".join(names), 18, UiKit.DIM))
 
+	if not as_guardian and not summary.is_empty():
+		var keeper: String = summary.get("guardian", "")
+		var who := "守墓者「%s」" % keeper if keeper != "" else "AI 守墓者"
+		var line := "全隊撤出 $%d／門檻 $%d：%s" % [summary.get("extracted", 0), summary.get("threshold", 0),
+			who + "贏了" if summary.get("guardian_won", false) else "你們贏過了" + who]
+		column.add_child(UiKit.label(line, 18, UiKit.DIM))
 	column.add_child(UiKit.label("現在的錢：$%d" % GameState.money, 22))
 	var button := UiKit.button("回到倉庫", func() -> void: continue_requested.emit())
 	button.custom_minimum_size = Vector2(0, 52)
