@@ -36,6 +36,7 @@ func _run() -> void:
 	await _test_tuner()
 	await _test_child()
 	await _test_items()
+	await _test_gear()
 	Run.forced_monsters = ["colossus"]
 	await _test_maps()
 	print("SMOKE TEST %s (%d failures)" % ["PASSED" if _failures == 0 else "FAILED", _failures])
@@ -502,6 +503,98 @@ func _test_items() -> void:
 	player.velocity = Vector3.ZERO
 	await _frames(40)
 	_check(player.velocity.y >= -Player.UMBRELLA_FALL_SPEED - 0.5 and not player.is_dead, "an umbrella slows your fall")
+	await _end_run(main)
+
+
+func _test_gear() -> void:
+	print("gear")
+	Run.forced_monsters = ["greeter", "rats", "fog_walker"]
+	var main = await _new_run({"weapon": "shotgun", "boosts": ["exoskeleton", "heart_detector", "second_life"]})
+	var player: Player = main.player
+	var greeter: Greeter = _monster(main, Greeter)
+	var rats: RatSwarm = _monster(main, RatSwarm)
+	var walker: FogWalker = _monster(main, FogWalker)
+	for monster in [greeter, rats, walker]:
+		monster.global_position = Vector3(-10, 0.1, -16)
+		monster.set_physics_process(false)
+	player.global_position = Vector3(2, 0.1, 9)
+	player.rotation.y = 0.0
+	player.get_node("Head").rotation.x = 0.0
+	await _frames(5)
+
+	greeter.global_position = Vector3(2, 0.1, 4)
+	player.use_weapon()
+	await _frames(3)
+	_check(TimeWarp.is_stunned(greeter) and player.weapon_ammo == 1, "a shotgun blast knocks a medium monster down")
+	greeter.global_position = Vector3(-10, 0.1, -16)
+
+	_check(player.can_carry({"weight": 40.0}) and Player.max_carry(player) == 45.0, "the exoskeleton carries 15kg more")
+	Input.action_press("crouch")
+	await _frames(5)
+	Input.action_release("crouch")
+	_check(not player.is_crouching, "but you can't crouch in it")
+
+	walker.global_position = Vector3(5, 0.1, 6)
+	await _frames(40)
+	_check(main.hud._readout.text.begins_with("心跳偵測：") and not main.hud._readout.text.contains("沒有"), "the heartbeat detector senses what's near (%s)" % main.hud._readout.text)
+
+	player.global_position = Vector3(2, 0.1, 9)
+	player._rewind.clear()
+	await _frames(30)
+	var safe: Vector3 = player._rewind[0]
+	player.global_position = Vector3(2, 0.1, 5)
+	player.die("test")
+	await _frames(2)
+	_check(not player.is_dead and player.global_position.distance_to(safe) < 1.0 and not player.has_gear("second_life"),
+		"the second-life watch rewinds death once")
+
+	player.equip({"weapon": "nail_gun", "boosts": ["cat_eye"]})
+	player.global_position = Vector3(2, 0.1, 9)
+	player.get_node("Head").rotation.x = -0.4
+	rats.global_position = Vector3(2, 0.1, 6)
+	await _frames(2)
+	player.use_weapon()
+	await _frames(3)
+	_check(not is_instance_valid(rats) or rats.is_queued_for_deletion(), "the nail gun pins a small monster for good")
+
+	walker.global_position = Vector3(2, 0.1, 5)
+	player.get_node("Head").rotation.x = 0.0
+	player.use_boost()
+	await _frames(3)
+	_check(walker._model.visible, "cat-eye drops show the invisible")
+	player._cat_eye = 0.01
+	await _frames(3)
+	_check(player.view_saturation() == 0.0, "then the world goes black and white")
+
+	player.equip({"weapon": "megaphone"})
+	walker.global_position = Vector3(-10, 0.1, -16)
+	greeter.global_position = Vector3(3, 0.1, 4)
+	await _frames(2)
+	player.use_weapon()
+	await _frames(3)
+	_check(TimeWarp.is_stunned(greeter), "the megaphone stuns everything in front")
+
+	player.equip({"weapon": "railgun"})
+	TimeWarp.instance._stun.clear()
+	greeter.set_physics_process(false)
+	greeter.global_position = Vector3(2, 0.1, 3)
+	player.use_weapon()
+	await _frames(int(Player.RAILGUN_CHARGE * 60) + 10)
+	_check(TimeWarp.is_stunned(greeter) and player.weapon_ammo == 0, "the railgun fires after charging")
+
+	player.equip({"weapon": "rubber_duck"})
+	TimeWarp.instance._stun.clear()
+	greeter.set_physics_process(false)
+	greeter.global_position = Vector3(2, 0.1, 7.5)
+	player.global_position = Vector3(2, 0.1, 14)
+	player.use_weapon()
+	await _frames(int(RubberDuck.FUSE * 60) + 20)
+	_check(player.weapon_ammo == 1 and TimeWarp.is_stunned(greeter), "the rubber duck quacks, then blows up whatever came to look")
+
+	var before := get_nodes_in_group("monsters").size()
+	player.equip({"boosts": ["rabbit_foot"]})
+	await _frames(10)
+	_check(get_nodes_in_group("monsters").size() == before + 1, "the rabbit's foot brings one more monster")
 	await _end_run(main)
 
 

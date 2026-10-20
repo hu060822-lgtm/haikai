@@ -40,6 +40,7 @@ var _flicker := 1.5
 var _flicker_on := 0.0
 var _cough := 4.0
 var _wander := 0.0
+var _spotted := false
 
 
 func _ready() -> void:
@@ -85,6 +86,14 @@ func weapon_hit() -> void:
 func host_action(action: String, _player: Player) -> void:
 	if action == "reveal":
 		reveal()
+
+
+## Local only: cat-eye drops let this player see its outline.
+func set_spotted(on: bool) -> void:
+	if on == _spotted:
+		return
+	_spotted = on
+	_model.visible = on or revealed
 
 
 func reveal() -> void:
@@ -182,7 +191,7 @@ func _tells(delta: float) -> void:
 	if _cough <= 0.0:
 		_cough = rng.randf_range(4.0, 8.0)
 		Sfx.play_3d(get_parent(), global_position + Vector3.UP * 1.6, "cough", -6.0, 18.0, rng.randf_range(0.8, 1.0))
-	if revealed:
+	if revealed or _spotted:
 		return
 	# Now and then the haze shows its outline for a blink.
 	_flicker -= delta

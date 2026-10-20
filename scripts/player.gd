@@ -43,6 +43,13 @@ const VOICE_RATE := 11025.0
 const HOT_INTERVAL := 2.5
 const HOT_DAMAGE := 3.0
 const EXO_EXTRA_CARRY := 15.0
+const IRON_LUNG_DRAIN := 0.67
+const GLIDE_FALL_SPEED := 1.2
+const HEART_RANGE := 15.0
+const RAILGUN_CHARGE := 3.0
+const CAT_EYE_TIME := 30.0
+const REWIND_TIME := 5.0
+const REWIND_STEP := 0.25
 # Loot that does something (see LootTable "use", "effect" and tags).
 const ALIVE_INTERVAL := Vector2(12.0, 25.0)
 const ALIVE_ESCAPE_CHANCE := 0.4
@@ -127,6 +134,11 @@ var _readout_timer := 0.0
 var _readout := ""
 var _candle: OmniLight3D
 var _candle_on := false
+var _charge := 0.0
+var _cat_eye := 0.0
+var _cat_eye_after := 0.0
+var _rewind: Array[Vector3] = []
+var _rewind_timer := 0.0
 
 
 func _ready() -> void:
@@ -445,11 +457,16 @@ func _process(delta: float) -> void:
 func equip(loadout: Dictionary) -> void:
 	weapon_id = loadout.get("weapon", "")
 	weapon_ammo = Gear.info(weapon_id).get("ammo", 0)
+	_weapon_cooldown = 0.0
+	_charge = 0.0
 	boosts.clear()
 	for id in loadout.get("boosts", []):
 		boosts.append(id)
 	_recalculate()
 	gear_changed.emit()
+	if has_gear("rabbit_foot") and is_multiplayer_authority() and Run.instance != null:
+		Run.instance.request_lucky.call_deferred()
+		message.emit("幸運符在發燙…這局好東西比較多，但怪物也多了一隻。")
 
 
 ## Gear the player still has (consumed items are gone), returned on extraction.
@@ -494,6 +511,9 @@ func take_damage(amount: float, cause: String) -> void:
 func die(cause: String) -> void:
 	if is_dead:
 		return
+	if "second_life" in boosts and not _rewind.is_empty():
+		_rewind_time()
+		return
 	is_dead = true
 	health = 0.0
 	health_changed.emit(0.0)
@@ -520,9 +540,11 @@ func _physics_process(delta: float) -> void:
 		velocity.y -= _gravity * delta
 		if velocity.y < -UMBRELLA_FALL_SPEED and has_effect("umbrella"):
 			velocity.y = -UMBRELLA_FALL_SPEED
+		if velocity.y < -GLIDE_FALL_SPEED and gliding():
+			velocity.y = -GLIDE_FALL_SPEED
 		_fall_speed = maxf(_fall_speed, -velocity.y)
 
-	if input_enabled and Input.is_action_pressed("crouch"):
+	if input_enabled and Input.is_action_pressed("crouch") and not has_gear("exoskeleton"):
 		_set_crouch(true)
 	elif is_crouching and _can_stand():
 		_set_crouch(false)
@@ -561,7 +583,7 @@ func _physics_process(delta: float) -> void:
 			velocity = transform.basis.z * 3.0
 			_ladders = 0
 
-	var accel := 10.0 if is_on_floor() or climbing else 2.0
+	var accel := 10.0 if is_on_floor() or climbing else (5.0 if gliding() else 2.0)
 	velocity.x = lerpf(velocity.x, direction.x * speed, accel * delta)
 	velocity.z = lerpf(velocity.z, direction.z * speed, accel * delta)
 	move_and_slide()
@@ -656,25 +678,76 @@ func use_weapon() -> void:
 			marble.global_position = _camera.global_position - _camera.global_basis.z * 0.5
 			marble.linear_velocity = -_camera.global_basis.z * 22.0
 			gear_changed.emit()
+		"boomerang":
+			_weapon_cooldown = 1.5
+			_fire()
+			if randf() < 0.15:
+				weapon_id = ""
+				message.emit("扳手飛回來的時候沒接住…它不見了。")
+				gear_changed.emit()
+		"nail_gun", "flamethrower", "shotgun":
+			if not _spend_ammo():
+				return
+			_weapon_cooldown = {"nail_gun": 0.25, "flamethrower": 0.8, "shotgun": 1.2}[weapon_id]
+			_fire()
+			if weapon_id == "shotgun":
+				add_shake(0.5)
+		"shock_glove":
+			_weapon_cooldown = 15.0
+			_fire()
+			message.emit("滋——！手套沒電了，充電中（15 秒）")
+		"megaphone":
+			_weapon_cooldown = 12.0
+			_fire()
+			add_shake(0.3)
+		"rubber_duck":
+			if not _spend_ammo():
+				return
+			_weapon_cooldown = 1.0
+			if Run.instance != null:
+				Run.instance.request_duck(_camera.global_position - _camera.global_basis.z * 0.5,
+					-_camera.global_basis.z * 9.0 + Vector3.UP * 2.0)
+		"railgun":
+			if weapon_ammo <= 0:
+				message.emit("加農炮已經沒有彈藥了")
+				return
+			if _charge <= 0.0:
+				_charge = RAILGUN_CHARGE
+				Sfx.play_2d(self, "zap", -6.0, 0.5)
+				message.emit("磁軌加農炮充能中…（3 秒）")
 
 
+## Q: uses the first consumable boost in the loadout.
 func use_boost() -> void:
 	if _bitten > 0.0:
 		message.emit("手被咬住了，用不了道具！")
 		return
-	if "adrenaline" in boosts:
-		boosts.erase("adrenaline")
-		_adrenaline = ADRENALINE_TIME
-		stamina = 1.0
-		_exhausted = false
-		stamina_changed.emit(stamina)
-		Sfx.play_2d(self, "heartbeat", -2.0, 1.3)
-		message.emit("腎上腺素！")
-		_recalculate()
-		gear_changed.emit()
+	var id := ""
+	for boost in boosts:
+		if Gear.info(boost).get("consumable", false):
+			id = boost
+			break
+	if id == "":
+		return
+	boosts.erase(id)
+	match id:
+		"adrenaline":
+			_adrenaline = ADRENALINE_TIME
+			stamina = 1.0
+			_exhausted = false
+			stamina_changed.emit(stamina)
+			Sfx.play_2d(self, "heartbeat", -2.0, 1.3)
+			message.emit("腎上腺素！")
+		"cat_eye":
+			_cat_eye = CAT_EYE_TIME
+			Sfx.play_2d(self, "tink", -4.0, 0.5)
+			message.emit("眼睛一陣刺痛…你看得到平常看不到的東西了。")
+	_recalculate()
+	gear_changed.emit()
 
 
 func _update_boost_timers(delta: float) -> void:
+	_update_gadgets(delta)
 	if _adrenaline > 0.0:
 		_adrenaline -= delta
 		if _adrenaline <= 0.0:
@@ -728,7 +801,10 @@ func _update_footsteps(delta: float, moving: bool, sprinting: bool) -> void:
 	_step_timer -= delta
 	if _step_timer <= 0.0:
 		_step_timer = 0.32 if sprinting else (0.7 if is_crouching else 0.48)
-		GameNoise.emit(get_tree(), global_position, STEP_NOISE[gait], GameNoise.Kind.FOOTSTEP)
+		var radius: float = STEP_NOISE[gait]
+		if sprinting and has_gear("iron_lung"):
+			radius *= 1.4  # wheezing
+		GameNoise.emit(get_tree(), global_position, radius, GameNoise.Kind.FOOTSTEP)
 		var volume := -22.0 if is_crouching else (-8.0 if sprinting else -14.0)
 		Sfx.play_3d(get_parent(), global_position, "step", volume, 20.0, randf_range(0.85, 1.15))
 
@@ -798,7 +874,8 @@ func _weight_factor() -> float:
 func _update_stamina(sprinting: bool, delta: float) -> void:
 	var before := stamina
 	if sprinting and _adrenaline <= 0.0:
-		stamina = maxf(stamina - STAMINA_DRAIN * delta, 0.0)
+		var drain := STAMINA_DRAIN * (IRON_LUNG_DRAIN if has_gear("iron_lung") else 1.0)
+		stamina = maxf(stamina - drain * delta, 0.0)
 		if stamina == 0.0:
 			_exhausted = true
 	elif not sprinting:
@@ -1114,18 +1191,109 @@ func _update_music(delta: float) -> void:
 	Sfx.play_3d(get_parent(), global_position, "tune", -12.0, 18.0)
 
 
-## Post-shader colour: 1 normal, 0 black and white (gear can change it).
+## Post-shader colour: 1 normal, 0 black and white (after the cat-eye drops wear off).
 func view_saturation() -> float:
-	return 1.0
+	return 0.0 if _cat_eye_after > 0.0 else 1.0
 
 
-## Post-shader brightness: above 1 means night vision.
+## Post-shader brightness: above 1 means night vision (goggles, lantern off, not on a
+## map that's already bright).
 func view_gain() -> float:
-	return 1.0
+	if not has_gear("night_goggles") or lantern_on or is_dead:
+		return 1.0
+	if Run.instance != null and Run.instance.level.bright:
+		return 1.0
+	return 2.6
+
+
+## Holding jump in the air with the feather cloak.
+func gliding() -> bool:
+	return has_gear("feather_cloak") and input_enabled and not is_on_floor() and _ladders == 0 \
+		and Input.is_action_pressed("jump") and velocity.y < 0.0
+
+
+func _spend_ammo() -> bool:
+	if weapon_ammo <= 0:
+		message.emit("%s用完了" % Gear.info(weapon_id).name)
+		return false
+	weapon_ammo -= 1
+	gear_changed.emit()
+	return true
+
+
+func _fire() -> void:
+	if Run.instance != null:
+		Run.instance.request_weapon(weapon_id, _camera.global_position, -_camera.global_basis.z)
+
+
+## Railgun charge, cat-eye drops and the rewind watch's memory of where you were.
+func _update_gadgets(delta: float) -> void:
+	if _charge > 0.0:
+		_charge -= delta
+		add_shake(0.05)
+		if _charge <= 0.0 and weapon_id == "railgun" and weapon_ammo > 0:
+			weapon_ammo -= 1
+			_fire()
+			add_shake(0.8)
+			gear_changed.emit()
+	if _cat_eye > 0.0:
+		_cat_eye -= delta
+		_spot_hidden(_cat_eye > 0.0)
+		if _cat_eye <= 0.0:
+			_cat_eye_after = CAT_EYE_TIME
+			message.emit("藥效退了…眼前的顏色全都不見了。")
+	elif _cat_eye_after > 0.0:
+		_cat_eye_after -= delta
+	if "second_life" in boosts:
+		_rewind_timer -= delta
+		if _rewind_timer <= 0.0:
+			_rewind_timer = REWIND_STEP
+			_rewind.append(global_position)
+			while _rewind.size() > int(REWIND_TIME / REWIND_STEP):
+				_rewind.remove_at(0)
+
+
+## Locally show what the cat-eye drops let you see.
+func _spot_hidden(on: bool) -> void:
+	for monster in get_tree().get_nodes_in_group("monsters"):
+		if monster.has_method("set_spotted"):
+			monster.set_spotted(on)
+
+
+## The second-life watch: back to where you were five seconds ago, and it shatters.
+func _rewind_time() -> void:
+	boosts.erase("second_life")
+	global_position = _rewind[0]
+	velocity = Vector3.ZERO
+	_rewind.clear()
+	health = MAX_HEALTH * 0.5
+	health_changed.emit(health / MAX_HEALTH)
+	_fall_speed = 0.0
+	add_shake(0.6)
+	Sfx.play_2d(self, "chime", -2.0, 0.6)
+	message.emit("懷錶的指針倒轉了 5 秒…然後碎了。")
+	_recalculate()
+	gear_changed.emit()
 
 
 func _readout_text() -> String:
 	var lines := []
+	if has_gear("heart_detector"):
+		var count := 0
+		var nearest: Node3D = null
+		for node in get_tree().get_nodes_in_group("monsters"):
+			var monster := node as Node3D
+			if monster == null or monster is Mimic or monster is Mannequin:
+				continue
+			var distance := monster.global_position.distance_to(global_position)
+			if distance < HEART_RANGE:
+				count += 1
+				if nearest == null or distance < nearest.global_position.distance_to(global_position):
+					nearest = monster
+		if nearest == null:
+			lines.append("心跳偵測：沒有")
+		else:
+			lines.append("心跳偵測：%d 個　最近 %dm %s" % [count, int(nearest.global_position.distance_to(global_position)), _direction_word(nearest.global_position)])
 	if has_effect("thermometer"):
 		var nearest := INF
 		for node in get_tree().get_nodes_in_group("monsters"):
@@ -1134,3 +1302,11 @@ func _readout_text() -> String:
 		var degrees := int(clampf(-6.0 + nearest * 1.6, -6.0, 18.0))
 		lines.append("溫度計 %d°C%s" % [degrees, "　↓" if degrees < 6 else ""])
 	return "\n".join(lines)
+
+
+func _direction_word(at: Vector3) -> String:
+	var to := at - global_position
+	var local := global_basis.inverse() * to
+	if absf(local.z) > absf(local.x):
+		return "前方" if local.z < 0.0 else "後方"
+	return "右邊" if local.x > 0.0 else "左邊"

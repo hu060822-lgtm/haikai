@@ -474,6 +474,223 @@ func _item_effect(effect: String, pos: Vector3) -> void:
 			MonsterKit.tell(player, &"remote_event", [kind, at])
 
 
+# --- Weapons ------------------------------------------------------------------------
+
+## A player fired a weapon; the host works out what it hit (see Gear.WEAPON_HITS).
+func request_weapon(weapon: String, origin: Vector3, direction: Vector3) -> void:
+	_to_host(&"_weapon", [weapon, origin, direction])
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _weapon(weapon: String, origin: Vector3, direction: Vector3) -> void:
+	if not _is_host() or not Gear.WEAPON_HITS.has(weapon):
+		return
+	var rule: Dictionary = Gear.WEAPON_HITS[weapon]
+	direction = direction.normalized()
+	for monster in weapon_targets(rule, origin, direction):
+		_apply_hit(monster, rule)
+	var end := _wall_point(origin, direction, rule.range)
+	# The boomerang clangs where it lands; everything else is loud where you stand.
+	GameNoise.emit_local(get_tree(), end if weapon == "boomerang" else origin, rule.noise, GameNoise.Kind.IMPACT)
+	if weapon == "flamethrower":
+		for item in loot_root.get_children():
+			if item is LootItem:
+				var to: Vector3 = item.global_position - origin
+				if to.length() < rule.range and direction.dot(to.normalized()) > rule.cone:
+					item.queue_free()
+	_weapon_fx.rpc(weapon, origin, end)
+
+
+## Monsters a weapon hits: everything in a cone, or the first (railgun: every) monster
+## along the aim line before it meets a wall.
+func weapon_targets(rule: Dictionary, origin: Vector3, direction: Vector3) -> Array[Node3D]:
+	var result: Array[Node3D] = []
+	var reach: float = rule.range
+	if rule.has("cone"):
+		for monster in monsters_root.get_children():
+			if not monster is Node3D:
+				continue
+			var to: Vector3 = monster.global_position + Vector3.UP * 0.8 - origin
+			if to.length() < reach and direction.dot(to.normalized()) > rule.cone \
+					and MonsterKit.clear_line(get_world_3d(), origin, origin + to):
+				result.append(monster)
+		return result
+	var wall_distance := origin.distance_to(_wall_point(origin, direction, reach))
+	var hits := []
+	for monster in monsters_root.get_children():
+		if not monster is Node3D:
+			continue
+		var size := _size_of(monster)
+		var radius: float = {"small": 0.5, "medium": 0.6, "large": 1.4}[size]
+		var height: float = {"small": 1.0, "medium": 2.0, "large": 4.5}[size]
+		var base: Vector3 = monster.global_position - (Vector3.UP * 0.5 if monster is Moth else Vector3.ZERO)
+		# Closest approach of the aim line to the monster's vertical axis.
+		var flat_dir := Vector2(direction.x, direction.z)
+		var flat_to := Vector2(base.x - origin.x, base.z - origin.z)
+		var t := flat_to.dot(flat_dir) / maxf(flat_dir.length_squared(), 0.0001)
+		if t < 0.0 or t > wall_distance:
+			continue
+		var point := origin + direction * t
+		if Vector2(point.x - base.x, point.z - base.z).length() < radius and point.y > base.y - 0.2 and point.y < base.y + height:
+			hits.append([t, monster])
+	hits.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
+	for hit in hits:
+		result.append(hit[1])
+		if not rule.get("pierce", false):
+			break
+	return result
+
+
+func _apply_hit(monster: Node3D, rule: Dictionary) -> void:
+	if monster is FogWalker:
+		monster.reveal()
+	var effect = rule.get(_size_of(monster), 0.0)
+	if effect is String:
+		_kill_monster(monster)
+	elif effect > 0.0:
+		TimeWarp.stun(monster, effect)
+
+
+## Small monsters can die. The child just runs off to play elsewhere for a while.
+func _kill_monster(monster: Node3D) -> void:
+	if monster is Mimic:
+		monster.host_action("kill", null)
+	elif monster is HideChild:
+		monster.host_kill()
+	else:
+		_monster_died.rpc(monster.global_position)
+		monster.queue_free()
+
+
+@rpc("authority", "call_local", "reliable")
+func _monster_died(pos: Vector3) -> void:
+	Sfx.play_3d(self, pos, "screech", -2.0, 30.0, 1.6)
+
+
+func _size_of(monster: Node) -> String:
+	return MonsterRoster.MONSTERS.get(monster.get_meta("kind", ""), {}).get("size", "medium")
+
+
+func _wall_point(origin: Vector3, direction: Vector3, reach: float) -> Vector3:
+	var to := origin + direction * reach
+	var query := PhysicsRayQueryParameters3D.create(origin, to, Layers.WORLD | Layers.WALKWAY)
+	var hit := get_world_3d().direct_space_state.intersect_ray(query)
+	return hit.position if not hit.is_empty() and not hit.collider is Player else to
+
+
+@rpc("authority", "call_local", "reliable")
+func _weapon_fx(weapon: String, origin: Vector3, end: Vector3) -> void:
+	match weapon:
+		"boomerang":
+			Sfx.play_3d(self, end, "clank", 0.0, 35.0, 1.2)
+		"nail_gun":
+			Sfx.play_3d(self, origin, "tink", -2.0, 25.0, 2.2)
+		"shock_glove":
+			Sfx.play_3d(self, origin, "zap", 0.0, 20.0)
+		"megaphone":
+			Sfx.play_3d(self, origin, "roar", 6.0, 80.0)
+		"flamethrower":
+			Sfx.play_3d(self, origin, "hiss", 2.0, 30.0, 0.6)
+			_flames(origin, end)
+		"shotgun":
+			Sfx.play_3d(self, origin, "bang", 6.0, 90.0)
+		"railgun":
+			Sfx.play_3d(self, origin, "bang", 8.0, 90.0, 0.5)
+			_beam(origin, end)
+
+
+func _flames(origin: Vector3, end: Vector3) -> void:
+	var fire := CPUParticles3D.new()
+	fire.one_shot = true
+	fire.amount = 40
+	fire.lifetime = 0.6
+	fire.explosiveness = 0.7
+	fire.direction = (end - origin).normalized()
+	fire.spread = 18.0
+	fire.initial_velocity_min = 6.0
+	fire.initial_velocity_max = 9.0
+	fire.gravity = Vector3(0, 2.0, 0)
+	var mesh := SphereMesh.new()
+	mesh.radius = 0.12
+	mesh.height = 0.24
+	mesh.radial_segments = 4
+	mesh.rings = 2
+	fire.mesh = mesh
+	fire.material_override = PS1Materials.get_material("concrete", Color(1.0, 0.5, 0.1), true, Vector2.ONE, Color(1.0, 0.45, 0.1))
+	add_child(fire)
+	fire.global_position = origin + fire.direction * 0.6
+	fire.emitting = true
+	var glow := OmniLight3D.new()
+	glow.light_color = Color(1.0, 0.55, 0.2)
+	glow.light_energy = 2.0
+	glow.omni_range = 6.0
+	fire.add_child(glow)
+	get_tree().create_timer(1.2).timeout.connect(fire.queue_free)
+
+
+func _beam(origin: Vector3, end: Vector3) -> void:
+	var beam := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = Vector3(0.06, 0.06, origin.distance_to(end))
+	beam.mesh = box
+	beam.material_override = PS1Materials.get_material("concrete", Color(0.6, 0.9, 1.0), true, Vector2.ONE, Color(0.5, 0.9, 1.0))
+	add_child(beam)
+	beam.global_position = (origin + end) / 2.0
+	beam.look_at_from_position(beam.global_position, end, Vector3.UP if absf((end - origin).normalized().y) < 0.95 else Vector3.RIGHT)
+	get_tree().create_timer(0.3).timeout.connect(beam.queue_free)
+
+
+## A thrown rubber duck: every peer simulates its own copy.
+func request_duck(origin: Vector3, velocity: Vector3) -> void:
+	_to_host(&"_duck", [origin, velocity])
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _duck(origin: Vector3, velocity: Vector3) -> void:
+	if _is_host():
+		_throw_duck.rpc(origin, velocity)
+
+
+@rpc("authority", "call_local", "reliable")
+func _throw_duck(origin: Vector3, velocity: Vector3) -> void:
+	var duck := RubberDuck.new()
+	add_child(duck)
+	duck.global_position = origin
+	duck.linear_velocity = velocity
+
+
+## Host: the duck went off. Hurts monsters and scavengers alike.
+func host_explode(pos: Vector3) -> void:
+	var rule: Dictionary = Gear.WEAPON_HITS.rubber_duck
+	for monster in monsters_root.get_children():
+		if monster is Node3D and monster.global_position.distance_to(pos) < rule.range:
+			_apply_hit(monster, rule)
+	for player in all_players():
+		if player.is_active() and player.global_position.distance_to(pos) < rule.range:
+			MonsterKit.tell(player, &"remote_damage", [60.0, "被爆炸橡皮鴨炸死了", "被橡皮鴨的爆炸波及了！"])
+	GameNoise.emit_local(get_tree(), pos, rule.noise, GameNoise.Kind.IMPACT)
+
+
+## A scavenger brought a rabbit's foot: a few more good things, and one more monster.
+func request_lucky() -> void:
+	_to_host(&"_lucky")
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _lucky() -> void:
+	if not _is_host():
+		return
+	var spots := level.loot_spots.duplicate()
+	for i in 3:
+		var spot: Vector3 = spots[rng.randi_range(0, spots.size() - 1)]
+		host_spawn_loot(LootTable.roll(rng, 3.0, level.loot_pool), spot, rng.randf_range(0.0, TAU))
+	var kinds := []
+	for kind in MonsterRoster.MONSTERS:
+		if MonsterRoster.MONSTERS[kind].size != "large":
+			kinds.append(kind)
+	host_release_monster(kinds[rng.randi_range(0, kinds.size() - 1)], _far_patrol_point())
+
+
 @rpc("any_peer", "call_local", "reliable")
 func _pull_lever() -> void:
 	if _is_host() and not level.lever.is_pulled:
