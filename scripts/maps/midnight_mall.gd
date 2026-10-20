@@ -74,7 +74,7 @@ func build() -> void:
 	bounds = AABB(Vector3(-17.8, -0.5, -23.8), Vector3(35.6, 11.0, 47.6))
 	overview_height = ROOF_Y - 0.5
 	_speakers.assign([Vector3(0, 8, 0), Vector3(-12, 4, -21), Vector3(0, 4, 20), Vector3(13, 8, 4)])
-	_environment(Color(0.015, 0.012, 0.02), Color(0.28, 0.22, 0.32), 0.3, Color(0.05, 0.035, 0.06), 0.045, "drone", -18.0)
+	_environment(Color(0.015, 0.012, 0.02), Color(0.32, 0.27, 0.38), 0.55, Color(0.06, 0.045, 0.07), 0.04, "drone", -18.0)
 	_build_shell()
 	_build_atrium()
 	_build_upper_floor()
@@ -295,7 +295,7 @@ func _build_staff_area() -> void:
 
 func _build_lights() -> void:
 	# Half the ceiling lights are dead; the rest buzz and flicker.
-	_light(Vector3(0, 9.0, 0), Color(0.8, 0.9, 1.0), 0.8, 14.0, true)
+	_light(Vector3(0, 9.0, 0), Color(0.8, 0.9, 1.0), 1.1, 16.0, true)
 	_light(Vector3(-9, 4.2, -12), Color(0.85, 0.9, 1.0), 0.5, 8.0, true)
 	_light(Vector3(9, 4.2, 10), Color(0.85, 0.9, 1.0), 0.5, 8.0, false)
 	_light(Vector3(0, 4.0, 19), Color(1.0, 0.9, 0.75), 0.6, 10.0, true)

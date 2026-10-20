@@ -13,7 +13,7 @@ const HEATER_RATE := 12.0
 const FREEZE_INTERVAL := 1.5
 const FREEZE_DAMAGE := 6.0
 const FOG_OUTSIDE := 0.11
-const FOG_INSIDE := 0.035
+const FOG_INSIDE := 0.012
 
 const LOOT_SPOTS := [
 	# Main hut: bunks and mess.
@@ -70,7 +70,7 @@ func build() -> void:
 	loot_count = Vector2i(15, 19)
 	bounds = AABB(Vector3(-29.5, -0.5, -29.5), Vector3(59, 9, 59))
 	overview_height = 14.0
-	_env = _environment(Color(0.16, 0.17, 0.2), Color(0.5, 0.55, 0.65), 0.45, Color(0.55, 0.58, 0.64), FOG_OUTSIDE, "drone", -20.0)
+	_env = _environment(Color(0.5, 0.53, 0.59), Color(0.5, 0.55, 0.65), 0.35, Color(0.55, 0.58, 0.64), FOG_OUTSIDE, "drone", -20.0)
 	_build_ground()
 	_build_main_hut()
 	_build_lab()

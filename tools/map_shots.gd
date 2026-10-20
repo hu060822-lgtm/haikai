@@ -12,7 +12,7 @@ const SHOTS := {
 		{"name": "mall_dock", "pos": Vector3(0.0, 0.1, -20.0), "yaw": -PI / 2.0, "pitch": 0.0},
 	],
 	"station": [
-		{"name": "station_hut", "pos": Vector3(-17.0, 0.1, 0.0), "yaw": PI / 2.0, "pitch": 0.0},
+		{"name": "station_hut", "pos": Vector3(-14.0, 0.1, 1.0), "yaw": PI / 2.0 + 0.3, "pitch": 0.0},
 		{"name": "station_snow", "pos": Vector3(-6.0, 0.1, 2.0), "yaw": -PI / 2.0, "pitch": 0.05},
 		{"name": "station_yard", "pos": Vector3(-2.0, 0.1, 4.0), "yaw": PI, "pitch": 0.05},
 		{"name": "station_generator", "pos": Vector3(13.0, 0.1, -19.0), "yaw": -PI / 2.0, "pitch": -0.1},
