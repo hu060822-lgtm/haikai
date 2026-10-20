@@ -41,6 +41,10 @@ func _run() -> void:
 			await _guardian_host()
 		"guardian-client":
 			await _guardian_client()
+		"pvp-host":
+			await _pvp_host()
+		"pvp-client":
+			await _pvp_client()
 	print("NET TEST %s %s (%d failures)" % [role.to_upper(), "PASSED" if _failures == 0 else "FAILED", _failures])
 	# Let the last reliable messages go out before closing the connection.
 	await _frames(90)
@@ -180,6 +184,65 @@ func _guardian_client() -> void:
 	_main.player.die("test")
 	_check(await _wait(func() -> bool: return _ended), "the scavenger sees the run end")
 	_check(_summary.get("guardian_won", false) and _summary.get("guardian", "") == "守墓者", "the result names the winning guardian")
+
+
+## Two squads: the client joins the blue squad, they start apart, and the host shoots them.
+func _pvp_host() -> void:
+	print("pvp host")
+	_main.session.local_name = "紅"
+	_check(_main.session.host(PORT) == OK, "host opens a room")
+	_check(await _wait(func() -> bool: return _main.session.roster.size() == 2), "client joins the lobby")
+	_check(await _wait(func() -> bool: return _main.session.is_pvp()), "the client moves to another squad")
+	await _frames(10)
+	_main.session.begin_run()
+	_check(await _wait(func() -> bool: return _main.run != null and _main.run.all_players().size() == 2),
+		"both players spawn")
+	var rival := _remote_player()
+	_check(rival.squad == 1 and _main.player.squad == 0, "each player knows its squad")
+	_check(rival.global_position.distance_to(_main.player.global_position) > 12.0,
+		"the squads start apart (%.1f m)" % rival.global_position.distance_to(_main.player.global_position))
+	_main.player.global_position = SAFE_SPOT + Vector3(0, 0, -3)
+	# Wait for the client to settle on the catwalk, then shoot down at it from just above its head.
+	_check(await _wait(func() -> bool: return rival.global_position.distance_to(SAFE_SPOT) < 1.0), "the rival walks into view")
+	await _frames(30)
+	for shot in 2:
+		var head := rival.global_position + Vector3.UP * 1.6
+		_main.run.request_weapon("shotgun", head, Vector3.DOWN)
+		await _frames(20)
+	_check(await _wait(func() -> bool: return rival.is_dead), "two shotgun hits kill the rival")
+	_main.player.die("test")
+	_check(await _wait(func() -> bool: return _ended), "the run ends")
+	_check(_summary.get("squads", []).size() == 2, "the result knows there were two squads")
+
+
+func _pvp_client() -> void:
+	print("pvp client")
+	_main.session.local_name = "藍"
+	var joined := false
+	for attempt in 20:
+		if _main.session.join("127.0.0.1", PORT) == OK:
+			if await _wait(func() -> bool: return _main.session.roster.size() == 2, 120):
+				joined = true
+				break
+		await _frames(30)
+	_check(joined, "client connects to the host")
+	await _frames(10)
+	_main.session.request_next_squad()
+	_check(await _wait(func() -> bool: return _main.session.squad_of(_main.session.local_id()) == 1), "the client is in the blue squad")
+	_check(await _wait(func() -> bool: return _main.player != null and _main.run.all_players().size() == 2),
+		"client sees both players")
+	var player: Player = _main.player
+	var cause := [""]
+	player.died.connect(func(text: String) -> void: cause[0] = text)
+	await _frames(10)
+	var rival := _remote_player()
+	_check(rival != null and not rival._name_label.visible, "the rival has no name tag")
+	player.global_position = SAFE_SPOT
+	player.velocity = Vector3.ZERO
+	_check(await _wait(func() -> bool: return player.health < Player.MAX_HEALTH), "the host's shot hurts the client")
+	_check(await _wait(func() -> bool: return player.is_dead), "the client dies")
+	_check("紅隊" in cause[0], "the death names the squad that did it (%s)" % cause[0])
+	_check(await _wait(func() -> bool: return _ended), "client sees the run end")
 
 
 func _remote_player() -> Player:

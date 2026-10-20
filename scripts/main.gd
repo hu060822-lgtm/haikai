@@ -295,6 +295,11 @@ func _spectate_next() -> void:
 	for other in run.all_players():
 		if other != run.local_player and other.is_active():
 			candidates.append(other)
+	# Watch your own squad while any of them are still in; enemies only after that.
+	var mine := candidates.filter(func(other: Player) -> bool:
+		return run.local_player == null or other.squad == run.local_player.squad)
+	if not mine.is_empty():
+		candidates.assign(mine)
 	if _spectating != null and is_instance_valid(_spectating):
 		_spectating.set_viewed(false)
 	if candidates.is_empty():

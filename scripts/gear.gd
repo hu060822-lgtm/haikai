@@ -8,7 +8,7 @@ const MAX_BOOSTS := 3
 const ITEMS := {
 	"crowbar": {
 		"name": "撬棍", "slot": "weapon", "price": 60, "weight": 2.5,
-		"desc": "左鍵揮擊。可以撬開上鎖的櫃子，裡面有比較好的東西。揮空會發出聲音。",
+		"desc": "左鍵揮擊。可以撬開上鎖的櫃子，裡面有比較好的東西，也能敲別隊的人。揮空會發出聲音。",
 	},
 	"slingshot": {
 		"name": "彈弓", "slot": "weapon", "price": 40, "weight": 0.5, "ammo": 12,
@@ -90,15 +90,17 @@ const ITEMS := {
 
 ## What each weapon does when it connects, by monster size: "kill" or seconds of stun.
 ## range in metres; "cone" weapons hit everything in front (cos of the half angle).
+## "player" is the damage it does to a scavenger from another squad (out of 100 health).
 const WEAPON_HITS := {
-	"boomerang": {"range": 18.0, "small": 1.5, "medium": 1.5, "large": 0.5, "noise": 14.0},
-	"nail_gun": {"range": 25.0, "small": "kill", "medium": 0.8, "large": 0.0, "noise": 10.0},
-	"shock_glove": {"range": 2.6, "small": 3.0, "medium": 3.0, "large": 1.0, "noise": 5.0},
-	"megaphone": {"range": 10.0, "cone": 0.5, "small": 2.0, "medium": 2.0, "large": 2.0, "noise": 50.0},
-	"flamethrower": {"range": 5.0, "cone": 0.75, "small": "kill", "medium": 1.5, "large": 1.5, "noise": 12.0},
-	"shotgun": {"range": 30.0, "small": "kill", "medium": 12.0, "large": 3.0, "noise": 60.0},
-	"railgun": {"range": 60.0, "pierce": true, "small": "kill", "medium": 15.0, "large": 10.0, "noise": 40.0},
-	"rubber_duck": {"range": 4.5, "small": "kill", "medium": 4.0, "large": 4.0, "noise": 30.0},
+	"crowbar": {"range": 2.4, "small": 0.5, "medium": 0.3, "large": 0.0, "noise": 6.0, "player": 25.0},
+	"boomerang": {"range": 18.0, "small": 1.5, "medium": 1.5, "large": 0.5, "noise": 14.0, "player": 15.0},
+	"nail_gun": {"range": 25.0, "small": "kill", "medium": 0.8, "large": 0.0, "noise": 10.0, "player": 10.0},
+	"shock_glove": {"range": 2.6, "small": 3.0, "medium": 3.0, "large": 1.0, "noise": 5.0, "player": 15.0},
+	"megaphone": {"range": 10.0, "cone": 0.5, "small": 2.0, "medium": 2.0, "large": 2.0, "noise": 50.0, "player": 0.0},
+	"flamethrower": {"range": 5.0, "cone": 0.75, "small": "kill", "medium": 1.5, "large": 1.5, "noise": 12.0, "player": 35.0},
+	"shotgun": {"range": 30.0, "small": "kill", "medium": 12.0, "large": 3.0, "noise": 60.0, "player": 75.0},
+	"railgun": {"range": 60.0, "pierce": true, "small": "kill", "medium": 15.0, "large": 10.0, "noise": 40.0, "player": 100.0},
+	"rubber_duck": {"range": 4.5, "small": "kill", "medium": 4.0, "large": 4.0, "noise": 30.0, "player": 60.0},
 }
 
 

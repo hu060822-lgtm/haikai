@@ -49,7 +49,7 @@ func _ready() -> void:
 	else:
 		column.add_child(UiKit.label("你死了", 56, Color(0.9, 0.25, 0.2)))
 		column.add_child(UiKit.label(cause, 22))
-		column.add_child(UiKit.label("背包裡的 %d 件物品都留在工廠裡了。" % items.size(), 18, UiKit.DIM))
+		column.add_child(UiKit.label("背包裡的 %d 件物品都掉在你倒下的地方了。" % items.size(), 18, UiKit.DIM))
 		if not lost_gear.is_empty():
 			var names := []
 			for id in lost_gear:
@@ -62,7 +62,23 @@ func _ready() -> void:
 		var line := "全隊撤出 $%d／門檻 $%d：%s" % [summary.get("extracted", 0), summary.get("threshold", 0),
 			who + "贏了" if summary.get("guardian_won", false) else "你們贏過了" + who]
 		column.add_child(UiKit.label(line, 18, UiKit.DIM))
+	var squads: Array = summary.get("squads", [])
+	if squads.size() > 1:
+		column.add_child(_squad_ranking(squads, summary.get("squad_totals", {})))
 	column.add_child(UiKit.label("現在的錢：$%d" % GameState.money, 22))
 	var button := UiKit.button("回到倉庫", func() -> void: continue_requested.emit())
 	button.custom_minimum_size = Vector2(0, 52)
 	column.add_child(button)
+
+
+## Several squads: who got the most out, and where yours placed.
+func _squad_ranking(squads: Array, totals: Dictionary) -> Label:
+	var ranked := squads.duplicate()
+	ranked.sort_custom(func(a: int, b: int) -> bool: return totals.get(a, 0) > totals.get(b, 0))
+	var mine := Session.instance.squad_of(Session.instance.local_id()) if Session.instance != null else -1
+	var parts := []
+	for i in ranked.size():
+		var squad: int = ranked[i]
+		var you := "（你們）" if squad == mine and not as_guardian else ""
+		parts.append("%d. %s%s $%d" % [i + 1, Session.SQUAD_NAMES[squad], you, totals.get(squad, 0)])
+	return UiKit.label("小隊排名　" + "　".join(parts), 18, UiKit.ACCENT)

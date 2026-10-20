@@ -9,6 +9,7 @@ var _list: Label
 var _hint: Label
 var _start: Button
 var _role: Button
+var _squad: Button
 
 
 func _ready() -> void:
@@ -23,7 +24,7 @@ func _ready() -> void:
 	add_child(column)
 	column.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	column.custom_minimum_size = Vector2(560, 0)
-	column.position -= Vector2(280, 220)
+	column.position -= Vector2(280, 300)
 
 	column.add_child(UiKit.label("房間", 44, UiKit.ACCENT))
 	_hint = UiKit.label("", 16, UiKit.DIM)
@@ -35,6 +36,8 @@ func _ready() -> void:
 	_start.custom_minimum_size = Vector2(0, 54)
 	_start.add_theme_font_size_override("font_size", 22)
 	column.add_child(_start)
+	_squad = UiKit.button("", func() -> void: Session.instance.request_next_squad())
+	column.add_child(_squad)
 	_role = UiKit.button("", _toggle_role)
 	column.add_child(_role)
 	column.add_child(UiKit.button("離開房間", func() -> void: leave_requested.emit()))
@@ -58,6 +61,8 @@ func _refresh() -> void:
 		var tag := "（主機）" if id == 1 else ""
 		if session.role_of(id) == "guardian":
 			tag += "【守墓者】"
+		else:
+			tag = "［%s］" % Session.SQUAD_NAMES[session.squad_of(id)] + tag
 		var you := "　← 你" if id == session.local_id() else ""
 		lines.append("%s%s%s" % [session.roster[id].name, tag, you])
 	_list.text = "\n".join(lines) if not lines.is_empty() else "連線中…"
@@ -67,7 +72,12 @@ func _refresh() -> void:
 	var taken := session.guardian_id() != 0 and not me_guardian
 	_role.text = "改當搜刮者" if me_guardian else ("已經有人當守墓者了" if taken else "我要當守墓者（在機房操控整座工廠）")
 	_role.disabled = taken
+	_squad.visible = not me_guardian
+	var squads := session.active_squads()
+	_squad.text = "換小隊（現在：%s）" % Session.SQUAD_NAMES[session.squad_of(session.local_id())]
+	if squads.size() > 1:
+		_squad.text += "　· %d 隊互相競爭" % squads.size()
 	if session.is_host():
-		_hint.text = "朋友在「加入房間」輸入你的 IP 就能進來（埠 %d，最多 %d 人）。人到齊了按開始。沒人當守墓者時由 AI 代打。" % [Session.PORT, Session.MAX_PLAYERS]
+		_hint.text = "朋友在「加入房間」輸入你的 IP 就能進來（埠 %d，最多 %d 人）。人到齊了按開始。沒人當守墓者時由 AI 代打。分成不同小隊的話，各隊從不同地方出發，而且可以互相攻擊、搶對方的東西。" % [Session.PORT, Session.MAX_PLAYERS]
 	else:
-		_hint.text = "等主機按開始。"
+		_hint.text = "等主機按開始。分成不同小隊的話，各隊從不同地方出發，而且可以互相攻擊。"
