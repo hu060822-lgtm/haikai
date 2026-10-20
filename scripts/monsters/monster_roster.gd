@@ -7,6 +7,10 @@ const MONSTERS := {
 	"mannequin": {"name": "假人", "size": "medium", "count": [1, 1]},
 	"moth": {"name": "撲燈蛾", "size": "small", "count": [2, 3]},
 	"mimic": {"name": "擬態蟲", "size": "small", "count": [2, 3]},
+	"watcher": {"name": "長頸觀察者", "size": "large", "count": [1, 1]},
+	"greeter": {"name": "迎賓員", "size": "medium", "count": [1, 1]},
+	"collector": {"name": "回收員", "size": "medium", "count": [1, 1]},
+	"rats": {"name": "發條鼠群", "size": "small", "count": [1, 2]},
 }
 const MIN_KINDS := 2
 const MAX_KINDS := 4

@@ -168,6 +168,10 @@ func _host_spawn_monsters() -> void:
 					data.pos = _far_patrol_point()
 				"moth":
 					data.pos = level.random_patrol_point() + Vector3(0, 3.0, 0)
+				"watcher":
+					data.pos = _far_patrol_point()
+				"greeter", "collector", "rats":
+					data.pos = level.random_patrol_point() + Vector3.UP * 0.1
 				"mimic":
 					var spot: Dictionary = spots[serial % spots.size()]
 					data.pos = spot.pos
@@ -303,6 +307,26 @@ func _spawn_monster(data: Dictionary) -> Node:
 			mimic.rotation.y = data.rot
 			mimic.rng.seed = data.seed
 			monster = mimic
+		"watcher":
+			var watcher := Watcher.new()
+			watcher.patrol_points.assign(level.patrol_points)
+			watcher.rng.seed = data.seed
+			monster = watcher
+		"greeter":
+			var greeter := Greeter.new()
+			greeter.patrol_points.assign(level.patrol_points)
+			greeter.rng.seed = data.seed
+			monster = greeter
+		"collector":
+			var collector := Collector.new()
+			collector.patrol_points.assign(level.patrol_points)
+			collector.rng.seed = data.seed
+			monster = collector
+		"rats":
+			var rats := RatSwarm.new()
+			rats.home = data.pos
+			rats.rng.seed = data.seed
+			monster = rats
 		_:
 			var giant := BoilerColossus.new()
 			giant.rng.seed = data.seed

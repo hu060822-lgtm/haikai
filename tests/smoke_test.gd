@@ -26,6 +26,11 @@ func _run() -> void:
 	await _test_mimic()
 	await _test_field_control()
 	await _test_director()
+	await _test_watcher()
+	await _test_greeter()
+	await _test_collector()
+	await _test_rats()
+	Run.forced_monsters = ["colossus"]
 	await _test_maps()
 	print("SMOKE TEST %s (%d failures)" % ["PASSED" if _failures == 0 else "FAILED", _failures])
 	quit(1 if _failures > 0 else 0)
@@ -157,6 +162,136 @@ func _test_mimic() -> void:
 	_check(not is_instance_valid(other), "a crowbar poke kills a mimic")
 	await _end_run(main)
 	Run.forced_monsters = ["colossus"]
+
+
+## Sidestep left and right on the spot for the given number of physics frames.
+func _shuffle(frames: int) -> void:
+	for i in frames:
+		var left := (i / 20) % 2 == 0
+		Input.action_press("move_left" if left else "move_right")
+		Input.action_release("move_right" if left else "move_left")
+		await physics_frame
+	Input.action_release("move_left")
+	Input.action_release("move_right")
+
+
+func _test_watcher() -> void:
+	print("watcher")
+	Run.forced_monsters = ["watcher"]
+	var main = await _new_run()
+	var player: Player = main.player
+	var watcher: Watcher = _monster(main, Watcher)
+	_check(watcher != null, "watcher spawns")
+	watcher.global_position = Vector3(0, 0.1, -8)
+	watcher._pause = 999.0
+	player.global_position = Vector3(0, 0.1, 4)
+	await _frames(30)
+	_check(not watcher.can_see(player), "watcher can't see a player standing still")
+	await _shuffle(40)
+	_check(watcher.staring, "watcher locks on to a moving player")
+	await _frames(240)
+	_check(not watcher.staring and not player.is_dead, "freezing makes its stare slide off")
+	player.global_position = Vector3(13.5, 0.1, 0)
+	await _frames(10)
+	_check(watcher.is_covered(player), "a catwalk overhead hides you")
+	player.global_position = Vector3(0, 0.1, 4)
+	await _frames(10)
+	_check(not watcher.is_covered(player), "the open floor doesn't")
+	await _shuffle(300)
+	await _frames(5)
+	_check(player.is_dead, "moving under its stare for 3 seconds gets you taken")
+	await _end_run(main)
+
+
+func _test_greeter() -> void:
+	print("greeter")
+	Run.forced_monsters = ["greeter"]
+	var main = await _new_run()
+	var player: Player = main.player
+	var greeter: Greeter = _monster(main, Greeter)
+	_check(greeter != null, "greeter spawns")
+	player.global_position = Vector3(0, 0.1, 8)
+	player.rotation.y = 0.0
+	greeter.global_position = Vector3(0, 0.1, 13)
+	await _frames(30)
+	_check(greeter.following, "greeter falls in behind you")
+	Input.action_press("move_forward")
+	await _frames(60)
+	Input.action_release("move_forward")
+	_check(player.health == Player.MAX_HEALTH, "walking is fine")
+	player.global_position = Vector3(0, 0.1, 8)
+	await _frames(20)
+	Input.action_press("move_forward")
+	Input.action_press("sprint")
+	await _frames(40)
+	Input.action_release("sprint")
+	Input.action_release("move_forward")
+	_check(player.health < Player.MAX_HEALTH and greeter.angry, "running makes it snap (hp=%d)" % player.health)
+	await _frames(90)
+	greeter._cooldown = 0.0
+	player.pickup(LootTable.ITEMS[0])
+	greeter.interact(player)
+	await _frames(5)
+	_check(greeter._ignore.has(player), "showing it something you carry sends it away")
+	greeter._ignore.clear()
+	player.take_all_items()
+	var hp := player.health
+	greeter.interact(player)
+	await _frames(5)
+	_check(player.health < hp, "answering empty-handed is a mistake")
+	await _end_run(main)
+
+
+func _test_collector() -> void:
+	print("collector")
+	Run.forced_monsters = ["collector"]
+	var main = await _new_run()
+	var player: Player = main.player
+	var collector: Collector = _monster(main, Collector)
+	_check(collector != null, "collector spawns")
+	player.global_position = Vector3(-13, 0.1, 18)  # tucked away in the tool room
+	collector.global_position = Vector3(2, 0.1, 0)
+	main.run.host_spawn_loot(LootTable.ITEMS[3], collector.global_position + Vector3(0.4, 0.3, 0))
+	await _frames(20)
+	_check(collector.cart_load >= 1, "it clears loot off the floor into its cart")
+	player.global_position = Vector3(2, 0.1, 8)
+	player.set_lantern(true)
+	await _frames(20)
+	_check(collector.state == Collector.State.CHASE, "it comes after a scavenger it sees")
+	main.run.host_spawn_loot(LootTable.ITEMS[7], collector.global_position + Vector3(0, 0.5, 1.0), 0.0, false)
+	await _frames(30)
+	_check(collector.state == Collector.State.CONTENT, "a bribe thrown at it buys you peace")
+	await _end_run(main)
+
+
+func _test_rats() -> void:
+	print("rats")
+	Run.forced_monsters = ["rats"]
+	var main = await _new_run()
+	var player: Player = main.player
+	var swarms: Array = main.run.monsters_root.get_children().filter(func(node) -> bool: return node is RatSwarm)
+	_check(swarms.size() >= 1, "rat swarms spawn (%d)" % swarms.size())
+	var rats: RatSwarm = swarms[0]
+	for other in swarms.slice(1):
+		other.global_position = Vector3(0, 0.1, -100)
+		other.home = other.global_position
+	rats.global_position = Vector3(0, 0.1, 0)
+	rats.home = Vector3(-8, 0.1, -16)
+	player.global_position = Vector3(0, 0.1, 3)
+	for i in 3:
+		player.pickup(LootTable.ITEMS[10 + i])
+	var waited := 0
+	while player.items.size() == 3 and waited < 400:
+		await physics_frame
+		waited += 1
+	_check(player.items.size() < 3 and player.health < Player.MAX_HEALTH, "they swarm you and rob your pack (%d left, hp=%d)" % [player.items.size(), player.health])
+	await _frames(10)
+	_check(rats.state == RatSwarm.State.FETCH or rats.state == RatSwarm.State.HOME, "then drag the loot off")
+	rats.state = RatSwarm.State.WANDER
+	GameNoise.emit(self, rats.global_position + Vector3(1, 0, 0), 8.0, GameNoise.Kind.LANDING)
+	await _frames(2)
+	_check(rats.state == RatSwarm.State.SCATTER, "a landing next to them scatters them")
+	await _end_run(main)
 
 
 func _test_field_control() -> void:

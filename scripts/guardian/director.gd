@@ -58,7 +58,7 @@ func decide() -> String:
 			var angle := rng.randf_range(0.0, TAU)
 			var spot: Vector3 = loudest.pos + Vector3(cos(angle), 0.0, sin(angle)) * rng.randf_range(7.0, 10.0)
 			spot.y = maxf(loudest.pos.y, 0.1)
-			var kind: String = FieldControl.RELEASABLE[rng.randi_range(0, 1)]  # moths and mimics
+			var kind: String = FieldControl.RELEASABLE[rng.randi_range(0, 2)]  # moths, mimics and rats
 			if field.use_monster(kind, spot):
 				_pings.clear()
 				return "monster"

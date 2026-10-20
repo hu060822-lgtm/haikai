@@ -79,6 +79,9 @@ var _ceiling_check: ShapeCast3D
 var _focused: Node = null
 var _body: Node3D
 var _remote_last_pos := Vector3.ZERO
+## How fast this player is moving across the ground, on every peer (monsters that only
+## see movement, or punish running, read it on the host).
+var ground_speed := 0.0
 var _name_label: Label3D
 var _voice_playback: AudioStreamGeneratorPlayback
 var _bob_time := 0.0
@@ -292,6 +295,28 @@ func remote_bitten(seconds: float, damage: float) -> void:
 		message.emit("那不是寶物！它咬住你的手了，%d 秒內用不了武器和道具" % int(seconds))
 
 
+## Host -> owner: a monster has noticed you (no damage, just the dread).
+@rpc("any_peer", "call_local", "reliable")
+func remote_warn(text: String, shake := 0.2) -> void:
+	if not _from_host() or is_dead:
+		return
+	add_shake(shake)
+	message.emit(text)
+
+
+## Host -> owner: clockwork rats tore something out of the backpack. It drops at your feet.
+@rpc("any_peer", "call_local", "reliable")
+func remote_rob() -> void:
+	if not _from_host() or is_dead or items.is_empty():
+		return
+	var data: Dictionary = items.pop_at(randi_range(0, items.size() - 1))
+	_recalculate()
+	message.emit("發條鼠從背包叼走了「%s」！" % data.name)
+	var at := global_position + Vector3.UP * 0.3
+	if Run.instance != null:
+		Run.instance.request_drop(data, at, Vector3.ZERO)
+
+
 func _from_host() -> bool:
 	var sender := multiplayer.get_remote_sender_id()
 	return sender == 0 or sender == 1
@@ -335,6 +360,7 @@ func _process(delta: float) -> void:
 	var moved := Vector2(position.x - _remote_last_pos.x, position.z - _remote_last_pos.z).length()
 	_remote_last_pos = position
 	var speed := moved / maxf(delta, 0.001)
+	ground_speed = lerpf(ground_speed, clampf(speed, 0.0, 12.0), minf(8.0 * delta, 1.0))
 	if speed > 0.5 and speed < 12.0 and not is_dead:
 		_step_timer -= delta
 		if _step_timer <= 0.0:
@@ -411,6 +437,8 @@ func _physics_process(delta: float) -> void:
 		_head.rotation.z = lerpf(_head.rotation.z, 1.2, 3.0 * delta)
 		return
 
+	if is_multiplayer_authority():
+		ground_speed = Vector2(velocity.x, velocity.z).length()
 	_weapon_cooldown = maxf(_weapon_cooldown - delta, 0.0)
 	_bitten = maxf(_bitten - delta, 0.0)
 	_update_boost_timers(delta)
