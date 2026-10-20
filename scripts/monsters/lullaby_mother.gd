@@ -40,6 +40,8 @@ var _listen := 0.0
 var _upset := 0.0
 var _wander := 0.0
 var _warned := {}
+var _grudge: Player = null
+var _grudge_time := 0.0
 
 
 func _ready() -> void:
@@ -69,6 +71,34 @@ func hear(position: Vector3, _radius: float, kind: int) -> void:
 		_listen = LISTEN_TIME
 
 
+## Host: a weapon hit her. Listening to music she doesn't notice, and it hurts her
+## (x2.5); otherwise the bullets mostly sink into her (x0.5), the shot upsets her and
+## she comes for the one who fired.
+func on_hit(hit: Dictionary) -> float:
+	if listening:
+		return 2.5
+	var attacker: Player = hit.get("attacker") as Player
+	if attacker != null and attacker.is_active():
+		_grudge = attacker
+		_grudge_time = 15.0
+		if _upset <= 0.0:
+			MonsterKit.tell(attacker, &"remote_warn", ["搖籃曲走了調。她轉向你了。", 0.4])
+		_upset = UPSET_TIME
+	return 0.5
+
+
+## Host: broken. She sinks down and sobs instead of singing; when she gets up, she's upset.
+func on_broken() -> void:
+	_listen = LISTEN_TIME
+	_upset = LISTEN_TIME + UPSET_TIME
+	_sob.rpc()
+
+
+@rpc("authority", "call_local", "reliable")
+func _sob() -> void:
+	Sfx.play_3d(get_parent(), global_position + Vector3.UP * HEIGHT, "screech", 0.0, 40.0, 0.4)
+
+
 func _physics_process(delta: float) -> void:
 	if not is_on_floor():
 		velocity.y -= _gravity * delta
@@ -82,6 +112,7 @@ func _physics_process(delta: float) -> void:
 func _think(delta: float) -> void:
 	_listen = maxf(_listen - delta, 0.0)
 	_upset = maxf(_upset - delta, 0.0)
+	_grudge_time = maxf(_grudge_time - delta, 0.0)
 	listening = _listen > 0.0
 	upset = _upset > 0.0 and not listening
 	if listening:
@@ -144,6 +175,9 @@ func _find_target() -> Player:
 				best_distance = distance
 	if best != null:
 		return best
+	# Whoever shot her, she goes after for a while.
+	if _grudge_time > 0.0 and _grudge != null and is_instance_valid(_grudge) and _grudge.is_active():
+		return _grudge
 	for player in MonsterKit.active_players(get_tree()):
 		var chest := player.global_position + Vector3.UP
 		var distance := eye.distance_to(chest)

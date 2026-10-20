@@ -37,6 +37,7 @@ var _head: Node3D
 var _creak_timer := 0.0
 var _hit_cooldown := 0.0
 var _wander_time := 0.0
+var _shrug := 0.0
 
 
 func _ready() -> void:
@@ -70,8 +71,27 @@ func _physics_process(delta: float) -> void:
 	_sounds(delta)
 
 
+## Host: a weapon hit it. While anyone watches it, it is only a dummy: plaster that
+## won't break. Caught moving (nobody looking, or shot from the dark), it shatters easily.
+func on_hit(hit: Dictionary) -> float:
+	if is_watched():
+		var attacker: Player = hit.get("attacker") as Player
+		if attacker != null and _shrug <= 0.0:
+			_shrug = 6.0
+			MonsterKit.tell(attacker, &"remote_warn", ["子彈打在石膏上彈開了…被看著的時候，它只是個假人。", 0.0])
+		_play_chip.rpc()
+		return 0.0
+	return 1.5
+
+
+@rpc("authority", "call_local", "unreliable")
+func _play_chip() -> void:
+	Sfx.play_3d(get_parent(), global_position + Vector3.UP * 1.2, "tink", -4.0, 20.0, 1.4)
+
+
 func _think(delta: float) -> void:
 	_hit_cooldown = maxf(_hit_cooldown - delta, 0.0)
+	_shrug = maxf(_shrug - delta, 0.0)
 	if is_watched():
 		if moving:
 			moving = false

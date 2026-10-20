@@ -100,6 +100,34 @@ func is_covered(player: Player) -> bool:
 	return not MonsterKit.clear_line(get_world_3d(), top, top + Vector3.UP * COVER_HEIGHT, [get_rid()])
 
 
+## Host: a weapon hit it. The stilts and body are bone and gristle (0.3); the one lamp
+## of an eye up top is the weak spot (x3). A hit makes it look where it came from, and
+## if the shooter is moving, the stare is already half way to a grab.
+func on_hit(hit: Dictionary) -> float:
+	var point: Vector3 = hit.get("point", global_position)
+	var attacker: Player = hit.get("attacker") as Player
+	if attacker != null and attacker.is_active():
+		aim = attacker.global_position + Vector3.UP
+		_pause = 0.0
+		if can_see(attacker):
+			_stare[attacker] = maxf(_stare.get(attacker, 0.0), STARE_TO_GRAB * 0.5)
+	if point.distance_to(head_position()) < 1.1:
+		return 3.0
+	return 0.3
+
+
+## Host: broken. Its head droops to the floor and it staggers off, blind for a while.
+func on_broken() -> void:
+	_stare.clear()
+	_warned.clear()
+	staring = false
+	_cooldown = GRAB_COOLDOWN * 2.0
+	aim = global_position + Vector3(0, 0.5, -1.0)
+	if not patrol_points.is_empty():
+		_agent.target_position = patrol_points[rng.randi_range(0, patrol_points.size() - 1)]
+	_play_grab.rpc(head_position())
+
+
 func hear(position: Vector3, radius: float, _kind: int) -> void:
 	if staring or radius < 8.0 or global_position.distance_to(position) > radius * 1.5:
 		return

@@ -17,6 +17,7 @@ func _run() -> void:
 	Run.forced_map = "factory"
 	_test_economy()
 	_test_content()
+	await _test_gunsmith()
 	await _test_player_basics()
 	await _test_colossus()
 	await _test_extraction()
@@ -35,8 +36,11 @@ func _run() -> void:
 	await _test_fog_walker()
 	await _test_tuner()
 	await _test_child()
+	_failures += await load("res://tests/monster_b_tests.gd").new().run(self)
+	_failures += await load("res://tests/monster_a_tests.gd").new().run(self)
 	await _test_items()
 	await _test_gear()
+	await _test_combat()
 	await _test_squads()
 	Run.forced_monsters = ["colossus"]
 	await _test_traps()
@@ -49,14 +53,76 @@ func _run() -> void:
 func _test_economy() -> void:
 	print("economy")
 	GameState.reset()
-	_check(GameState.take("crowbar"), "can buy a crowbar")
-	_check(GameState.money == GameState.START_MONEY - 60, "buying costs money")
-	GameState.give_back("crowbar")
-	_check(GameState.owned("crowbar") == 1, "returned gear goes to the stash")
-	_check(GameState.take("crowbar") and GameState.money == GameState.START_MONEY - 60, "stash gear is free to take")
+	_check(GameState.take("adrenaline"), "can buy a boost")
+	_check(GameState.money == GameState.START_MONEY - 120, "buying costs money")
+	GameState.give_back("adrenaline")
+	_check(GameState.owned("adrenaline") == 1, "returned gear goes to the stash")
+	_check(GameState.take("adrenaline") and GameState.money == GameState.START_MONEY - 120, "stash gear is free to take")
+	GameState.give_back("revolver")
+	_check(GameState.owned("revolver") == 0, "the free revolver never piles up in the stash")
 	var socks := [LootTable.ITEMS[4], LootTable.ITEMS[4], LootTable.ITEMS[0]]
 	var payout := LootTable.payout(socks)
 	_check(payout.bonus == 200 and payout.total == 3 + 3 + 35 + 200, "a pair of socks pays the set bonus")
+	GameState.reset()
+
+
+## The stash screen's gunsmith bench: models for every frame, planning, plans, equipping.
+func _test_gunsmith() -> void:
+	print("gunsmith")
+	GameState.reset()
+	var models_ok := true
+	for frame_id in Arsenal.FRAMES:
+		var full := {"frame": frame_id, "parts": {}}
+		for slot in Arsenal.frame(frame_id).slots:
+			var options := Arsenal.parts_for(frame_id, slot)
+			if not options.is_empty():
+				full.parts[slot] = options[options.size() - 1]
+		var model := GunModels.build(full)
+		var muzzle := GunModels.muzzle_point(full)
+		if model.get_child_count() < 5 or model.get_node_or_null("Muzzle") == null or muzzle.z > -0.1:
+			models_ok = false
+		model.free()
+	_check(models_ok, "every frame builds a model with its parts and a muzzle in front")
+	var bare := GunModels.muzzle_point({"frame": "smg", "parts": {}})
+	var quiet := GunModels.muzzle_point({"frame": "smg", "parts": {"muzzle": "suppressor"}})
+	_check(quiet.z < bare.z - 0.1, "a suppressor moves the muzzle forward")
+
+	GameState.money = 1000
+	var screen := LoadoutScreen.new()
+	root.add_child(screen)
+	await process_frame
+	_check(screen.plan == Arsenal.STARTER, "the bench starts with the equipped (starter) gun")
+	screen.select_frame("smg")
+	screen.set_part("muzzle", "suppressor")
+	screen.set_part("sight", "red_dot")
+	screen.set_part("ammo", "ap_rounds")
+	_check(GameState.money == 1000 and screen.plan.parts.size() == 3, "planning a build costs nothing")
+	_check(screen.plan_cost() == 350 + 180 + 110 + 160, "the bench prices the missing pieces ($%d)" % screen.plan_cost())
+	screen.open_slot("muzzle")
+	await process_frame
+	screen.close_picker()
+	screen.save_current_plan("安靜衝鋒")
+	_check(GameState.builds.size() == 1 and GameState.builds[0].name == "安靜衝鋒", "the build saves as a named plan")
+	_check(screen.equip_plan() and GameState.money == 1000 - 800, "equipping buys the missing pieces")
+	_check(GameState.equipped.build == screen.plan and screen.plan_cost() == 0, "the plan is now the equipped gun")
+	screen.select_frame("shotgun")
+	_check(screen.plan.parts.has("muzzle") and not screen.plan.parts.has("magazine"), "switching frames keeps the parts that fit")
+	_check(screen.plan_cost() == 420, "parts on the equipped gun count as owned (only the shotgun is missing)")
+	screen.select_frame("railgun")
+	_check(not screen.equip_plan() and GameState.equipped.build.frame == "smg" and GameState.money == 200,
+			"an unaffordable build is refused and nothing changes")
+	screen.load_plan(0)
+	_check(screen.plan.frame == "smg" and screen.plan.parts.get("ammo") == "ap_rounds", "plans load back onto the bench")
+	screen.select_frame("revolver")
+	screen.set_part("muzzle", "")
+	screen.set_part("ammo", "")
+	screen.set_part("sight", "")
+	_check(screen.equip_plan() and GameState.owned("smg") == 1 and GameState.owned("suppressor") == 1,
+			"swapping back to the starter returns the pieces to the stash")
+	screen.delete_plan(0)
+	_check(GameState.builds.is_empty(), "plans can be deleted")
+	screen.queue_free()
+	await process_frame
 	GameState.reset()
 
 
@@ -102,9 +168,10 @@ func _test_content() -> void:
 		for kind in kinds:
 			if MonsterRoster.MONSTERS[kind].size == "large":
 				large += 1
-		if kinds.size() < MonsterRoster.MIN_KINDS or kinds.size() > MonsterRoster.MAX_KINDS or large > 1:
+		if kinds.size() < MonsterRoster.MIN_KINDS or kinds.size() > MonsterRoster.MAX_KINDS \
+				or large > MonsterRoster.MAX_LARGE or kinds.any(func(kind) -> bool: return MonsterRoster.MONSTERS[kind].get("spawned_only", false)):
 			ok = false
-	_check(ok, "monster draws have 3 to 5 kinds and at most one large")
+	_check(ok, "monster draws have %d to %d kinds, at most %d large, never a spawned-only kind" % [MonsterRoster.MIN_KINDS, MonsterRoster.MAX_KINDS, MonsterRoster.MAX_LARGE])
 
 
 func _monster(main: Node, script: Script) -> Node:
@@ -169,7 +236,7 @@ func _test_moth() -> void:
 func _test_mimic() -> void:
 	print("mimic")
 	Run.forced_monsters = ["mimic"]
-	var main = await _new_run({"weapon": "crowbar", "boosts": ["adrenaline"]})
+	var main = await _new_run({"boosts": ["adrenaline"]})
 	var player: Player = main.player
 	var mimics: Array = main.run.monsters_root.get_children().filter(func(node) -> bool: return node is Mimic)
 	_check(mimics.size() >= 2, "mimics spawn (%d)" % mimics.size())
@@ -184,7 +251,7 @@ func _test_mimic() -> void:
 	var other: Mimic = mimics[1]
 	other.pry(player)
 	await _frames(5)
-	_check(not is_instance_valid(other), "a crowbar poke kills a mimic")
+	_check(not is_instance_valid(other), "a knife poke kills a mimic")
 	await _end_run(main)
 	Run.forced_monsters = ["colossus"]
 
@@ -369,7 +436,7 @@ func _test_mother() -> void:
 func _test_fog_walker() -> void:
 	print("fog walker")
 	Run.forced_monsters = ["fog_walker"]
-	var main = await _new_run({"weapon": "crowbar"})
+	var main = await _new_run()
 	var player: Player = main.player
 	var walker: FogWalker = _monster(main, FogWalker)
 	_check(walker != null and not walker.revealed, "fog walker spawns unseen")
@@ -517,7 +584,7 @@ func _test_items() -> void:
 func _test_gear() -> void:
 	print("gear")
 	Run.forced_monsters = ["greeter", "rats", "fog_walker"]
-	var main = await _new_run({"weapon": "shotgun", "boosts": ["exoskeleton", "heart_detector", "second_life"]})
+	var main = await _new_run({"boosts": ["exoskeleton", "heart_detector", "second_life"]})
 	var player: Player = main.player
 	var greeter: Greeter = _monster(main, Greeter)
 	var rats: RatSwarm = _monster(main, RatSwarm)
@@ -529,12 +596,6 @@ func _test_gear() -> void:
 	player.rotation.y = 0.0
 	player.get_node("Head").rotation.x = 0.0
 	await _frames(5)
-
-	greeter.global_position = Vector3(2, 0.1, 4)
-	player.use_weapon()
-	await _frames(3)
-	_check(TimeWarp.is_stunned(greeter) and player.weapon_ammo == 1, "a shotgun blast knocks a medium monster down")
-	greeter.global_position = Vector3(-10, 0.1, -16)
 
 	_check(player.can_carry({"weight": 40.0}) and Player.max_carry(player) == 45.0, "the exoskeleton carries 15kg more")
 	Input.action_press("crouch")
@@ -556,17 +617,9 @@ func _test_gear() -> void:
 	_check(not player.is_dead and player.global_position.distance_to(safe) < 1.0 and not player.has_gear("second_life"),
 		"the second-life watch rewinds death once")
 
-	player.equip({"weapon": "nail_gun", "boosts": ["cat_eye"]})
+	player.equip({"boosts": ["cat_eye"]})
 	player.global_position = Vector3(2, 0.1, 9)
-	player.get_node("Head").rotation.x = -0.4
-	rats.global_position = Vector3(2, 0.1, 6)
-	await _frames(2)
-	player.use_weapon()
-	await _frames(3)
-	_check(not is_instance_valid(rats) or rats.is_queued_for_deletion(), "the nail gun pins a small monster for good")
-
 	walker.global_position = Vector3(2, 0.1, 5)
-	player.get_node("Head").rotation.x = 0.0
 	player.use_boost()
 	await _frames(3)
 	_check(walker._model.visible, "cat-eye drops show the invisible")
@@ -574,36 +627,176 @@ func _test_gear() -> void:
 	await _frames(3)
 	_check(player.view_saturation() == 0.0, "then the world goes black and white")
 
-	player.equip({"weapon": "megaphone"})
-	walker.global_position = Vector3(-10, 0.1, -16)
-	greeter.global_position = Vector3(3, 0.1, 4)
-	await _frames(2)
-	player.use_weapon()
-	await _frames(3)
-	_check(TimeWarp.is_stunned(greeter), "the megaphone stuns everything in front")
-
-	player.equip({"weapon": "railgun"})
-	TimeWarp.instance._stun.clear()
-	greeter.set_physics_process(false)
-	greeter.global_position = Vector3(2, 0.1, 3)
-	player.use_weapon()
-	await _frames(int(Player.RAILGUN_CHARGE * 60) + 10)
-	_check(TimeWarp.is_stunned(greeter) and player.weapon_ammo == 0, "the railgun fires after charging")
-
-	player.equip({"weapon": "rubber_duck"})
-	TimeWarp.instance._stun.clear()
-	greeter.set_physics_process(false)
-	greeter.global_position = Vector3(2, 0.1, 7.5)
-	player.global_position = Vector3(2, 0.1, 14)
-	player.use_weapon()
-	await _frames(int(RubberDuck.FUSE * 60) + 20)
-	_check(player.weapon_ammo == 1 and TimeWarp.is_stunned(greeter), "the rubber duck quacks, then blows up whatever came to look")
-
 	var before := get_nodes_in_group("monsters").size()
 	player.equip({"boosts": ["rabbit_foot"]})
 	await _frames(10)
 	_check(get_nodes_in_group("monsters").size() == before + 1, "the rabbit's foot brings one more monster")
 	await _end_run(main)
+
+
+## Every frame and part makes sane numbers, and parts only go where they fit.
+func _test_arsenal() -> void:
+	print("arsenal")
+	var kinds := ["hitscan", "cone", "arc", "lob", "bounce", "charge"]
+	var frames_ok := true
+	for frame_id in Arsenal.FRAMES:
+		var s := Arsenal.stats({"frame": frame_id, "parts": {}})
+		if not (s.damage > 0.0 and s.rate > 0.0 and s.mag >= 1 and s.reserve >= 1 and s.reload > 0.0 \
+				and s.range > 0.0 and s.noise > 0.0 and s.zoom >= 1.0 and s.kind in kinds and s.weight > 0.0):
+			frames_ok = false
+			print("    bad frame ", frame_id, " ", s)
+	_check(frames_ok, "all %d frames have sane stats" % Arsenal.FRAMES.size())
+	var parts_ok := true
+	var fitted := 0
+	for frame_id in Arsenal.FRAMES:
+		for part_id in Arsenal.PARTS:
+			var slot: String = Arsenal.PARTS[part_id].slot
+			var s := Arsenal.stats({"frame": frame_id, "parts": {slot: part_id}})
+			if Arsenal.fits(frame_id, part_id) != (s.parts.get(slot, "") == part_id):
+				parts_ok = false
+				print("    part mismatch ", frame_id, " ", part_id)
+			if Arsenal.fits(frame_id, part_id):
+				fitted += 1
+				for stat in ["damage", "rate", "spread", "range", "noise", "recoil", "reload", "zoom", "weight"]:
+					if not is_finite(float(s[stat])) or float(s[stat]) < 0.0:
+						parts_ok = false
+						print("    bad stat ", frame_id, " ", part_id, " ", stat)
+	_check(parts_ok, "every part changes stats sanely and only fits where it should (%d fits)" % fitted)
+	var used := {}
+	for frame_id in Arsenal.FRAMES:
+		for part_id in Arsenal.PARTS:
+			if Arsenal.fits(frame_id, part_id):
+				used[part_id] = true
+	_check(used.size() == Arsenal.PARTS.size(), "every part fits at least one frame")
+	var quiet := Arsenal.stats({"frame": "smg", "parts": {"muzzle": "suppressor"}})
+	_check(quiet.noise < Arsenal.FRAMES.smg.noise, "a suppressor lowers the noise")
+
+
+## Guns against monsters: the starter revolver and knife, reloading, a large monster
+## that only breaks, every frame kind, and a build carried in and back out.
+func _test_combat() -> void:
+	print("combat")
+	_test_arsenal()
+	GameState.reset()
+	GameState.money = 5000
+	var plan := {"frame": "smg", "parts": {"muzzle": "suppressor", "gadget": "lucky_cat"}}
+	_check(GameState.equip_build(plan), "a build can be equipped")
+	var loadout := GameState.consume_equipped()
+	Run.forced_monsters = ["rats", "greeter", "colossus"]
+	var main = await _new_run(loadout)
+	var player: Player = main.player
+	var run: Run = main.run
+	var stats := Arsenal.stats(plan)
+	_check(player.weapon.frame == "smg" and player.mag_ammo == stats.mag and player.reserve_ammo == stats.reserve,
+		"the run starts with the build's gun and a full magazine (%d / %d)" % [player.mag_ammo, player.reserve_ammo])
+	_check(player.remaining_gear() == ["smg", "suppressor", "lucky_cat"], "its pieces go home on extraction (%s)" % [player.remaining_gear()])
+	GameState.record_extraction(0, player.remaining_gear())
+	_check(GameState.owned("smg") == 1 and GameState.owned("suppressor") == 1, "extraction puts the pieces back in the stash")
+
+	var colossus: BoilerColossus = main.colossus
+	var greeter: Greeter = _monster(main, Greeter)
+	var rats: RatSwarm = _monster(main, RatSwarm)
+	colossus.process_mode = Node.PROCESS_MODE_DISABLED
+	for monster in run.monsters_root.get_children():
+		if monster is Node3D:
+			monster.global_position = Vector3(-10, 0.1, -16) if monster != colossus else Vector3(0, 0.1, -100)
+			monster.set_physics_process(false)
+	var hits := []
+	player.hit_confirmed.connect(func(damage: float, result: String) -> void: hits.append([damage, result]))
+
+	# The free revolver and the knife against a swarm of clockwork rats.
+	player.equip({})
+	_check(player.weapon.frame == "revolver" and player.remaining_gear().is_empty(), "no build means the free revolver (never lost)")
+	player.global_position = Vector3(2, 0.1, 9)
+	player.rotation.y = 0.0
+	var head: Node3D = player.get_node("Head")
+	head.rotation.x = -0.28
+	rats.global_position = Vector3(2, 0.1, 5)
+	await _frames(5)
+	player.force_aim = true
+	var rat_hp := float(MonsterRoster.MONSTERS.rats.get("health", Run.SIZE_HEALTH.small))
+	player.global_position = Vector3(2, 0.1, 6.4)
+	head.rotation.x = -0.5
+	await _frames(3)
+	_check(player.melee(), "the knife stabs (V)")
+	await _frames(3)
+	_check(rats.get_meta("hp", rat_hp) < rat_hp and TimeWarp.is_stunned(rats), "a stab hurts a small monster and stuns it (hp %.0f)" % rats.get_meta("hp", rat_hp))
+	player.global_position = Vector3(2, 0.1, 9)
+	head.rotation.x = -0.28
+	await _frames(3)
+	var shots := 0
+	for i in 40:
+		if not is_instance_valid(rats) or rats.is_queued_for_deletion():
+			break
+		if player.mag_ammo == 0:
+			_check(player.reload(), "an empty revolver reloads (R)")
+			await _frames(int(player.weapon.reload * 60.0) + 5)
+			_check(player.mag_ammo == int(player.weapon.mag) and player.reserve_ammo == int(player.weapon.reserve) - int(player.weapon.mag),
+				"reloading fills the magazine from the reserve (%d / %d)" % [player.mag_ammo, player.reserve_ammo])
+		player._fire_cooldown = 0.0
+		player._bloom = 0.0
+		if player.fire():
+			shots += 1
+		await _frames(4)
+	_check(not is_instance_valid(rats) or rats.is_queued_for_deletion(), "the revolver kills a rat swarm (%d shots)" % shots)
+	_check(shots > 3, "but it takes a good few hits")
+	_check(hits.any(func(h: Array) -> bool: return h[1] == "kill") and hits.any(func(h: Array) -> bool: return h[1] == "hit"), "the shooter sees hit markers and the kill")
+	_check(main.hud._ammo.text == str(player.mag_ammo), "the HUD shows the ammo (%s %s)" % [main.hud._ammo.text, main.hud._reserve.text])
+
+	# A large monster is never killed: it breaks, then comes back at full health.
+	var max_hp := float(MonsterRoster.MONSTERS.colossus.get("health", Run.SIZE_HEALTH.large))
+	run.host_damage_monster(colossus, max_hp * 2.0, {}, player.global_position, player)
+	await _frames(2)
+	_check(is_instance_valid(colossus) and TimeWarp.is_stunned(colossus) and float(colossus.get_meta("hp")) == max_hp,
+		"a large monster at 0 health is broken, not killed")
+	_check(hits.back()[1] == "break", "and the shooter is told it broke")
+	TimeWarp.instance._stun.clear()
+
+	# Every frame's kind of shot lands on the colossus 4 m ahead.
+	colossus.global_position = Vector3(2, 0.1, 4)
+	head.rotation.x = 0.0
+	await _frames(3)
+	var origin: Vector3 = player._camera.global_position
+	var aim: Vector3 = -player._camera.global_basis.z
+	var missed := []
+	for frame_id in Arsenal.FRAMES:
+		colossus.set_meta("hp", max_hp)
+		var s := Arsenal.stats({"frame": frame_id, "parts": {}})
+		var dirs := []
+		for i in int(s.pellets):
+			dirs.append(aim)
+		run.host_fire(s, origin, dirs, player)
+		if s.kind != "lob" and float(colossus.get_meta("hp")) >= max_hp:
+			missed.append(frame_id)
+			print("    miss ", frame_id, " origin ", origin, " aim ", aim, " colossus ", colossus.global_position, " hits ", run.weapon_hits({"range": 40.0}, origin, aim), " wall ", run._wall_point(origin, aim, 40.0))
+	await _frames(int(RubberDuck.FUSE * 60.0) + 30)
+	_check(missed.is_empty(), "every kind of shot (hitscan, cone, arc, bounce, charge) hits (missed %s)" % [missed])
+	_check(float(colossus.get_meta("hp")) < max_hp, "the launched duck goes off next to it")
+	TimeWarp.instance._stun.clear()
+
+	# The railgun charges while the trigger is held, then fires.
+	player.equip({"build": {"frame": "railgun", "parts": {}}})
+	colossus.set_meta("hp", max_hp)
+	player.hold_trigger = true
+	await _frames(int(Player.CHARGE_TIME * 60.0) + 10)
+	player.hold_trigger = false
+	_check(player.mag_ammo == 0 and float(colossus.get_meta("hp")) < max_hp, "the railgun fires once it has charged")
+
+	# Burning and knock-back on a medium monster.
+	TimeWarp.instance._stun.clear()
+	colossus.global_position = Vector3(0, 0.1, -100)
+	greeter.global_position = Vector3(2, 0.1, 6)
+	var greeter_max := float(MonsterRoster.MONSTERS.greeter.get("health", Run.SIZE_HEALTH.medium))
+	await _frames(2)
+	run.host_damage_monster(greeter, 1.0, {"burn": 1.5, "knock": 1.0}, player.global_position)
+	var shoved: float = greeter.global_position.z
+	await _frames(100)
+	_check(float(greeter.get_meta("hp")) < greeter_max - 5.0, "fire keeps burning a monster (hp %.0f)" % greeter.get_meta("hp"))
+	_check(shoved < 5.9, "a knock-back shoves it away")
+	player.force_aim = false
+	await _end_run(main)
+	GameState.reset()
+	Run.forced_monsters = ["colossus"]
 
 
 func _test_field_control() -> void:
@@ -680,11 +873,11 @@ func _test_director() -> void:
 	await _end_run(main)
 
 
-## Another squad's scavenger, standing in front of you: weapons hurt them, never teammates.
+## Another squad's scavenger, standing in front of you: shots hurt them, never teammates.
 func _test_squads() -> void:
 	print("squads")
 	Run.forced_monsters = ["colossus"]
-	var main = await _new_run({"weapon": "shotgun"})
+	var main = await _new_run({"build": {"frame": "shotgun", "parts": {}}})
 	var player: Player = main.player
 	main.colossus.process_mode = Node.PROCESS_MODE_DISABLED
 	main.colossus.global_position = Vector3(0, 0, -100)
@@ -703,23 +896,28 @@ func _test_squads() -> void:
 	rival.global_position = player.global_position + aim * 3.0
 	await _frames(2)
 	_check(not rival._name_label.visible, "a rival's name doesn't float over their head")
-	var rule: Dictionary = Gear.WEAPON_HITS.shotgun
-	_check(main.run.player_targets(rule, origin, aim, player) == [rival], "the shotgun's aim line finds the rival")
+	var rule := {"range": 25.0}
+	_check(main.run.player_targets(rule, origin, aim, player) == [rival], "the shot's aim line finds the rival")
 	_check(main.run.player_targets(rule, origin, -aim, player).is_empty(), "aiming away misses")
 	rival.squad = 0
 	_check(main.run.player_targets(rule, origin, aim, player).is_empty(), "no friendly fire")
 	rival.squad = 1
-	main.run._weapon("shotgun", origin, aim)
+	var shotgun := Arsenal.stats({"frame": "shotgun", "parts": {}})
+	var pellets := []
+	for i in int(shotgun.pellets):
+		pellets.append(aim)
+	main.run.host_fire(shotgun, origin, pellets, player)
 	await _frames(2)
-	_check(rival.health == Player.MAX_HEALTH - rule.player, "a shotgun hit hurts the rival (hp=%d)" % rival.health)
-	main.run._weapon("crowbar", origin, aim)
+	var expected: float = Player.MAX_HEALTH - shotgun.damage * shotgun.pellets * Run.PVP_SCALE
+	_check(absf(rival.health - expected) < 0.01, "a point-blank shotgun blast nearly kills the rival (hp=%d)" % rival.health)
+	main.run._melee(origin, aim, false)
 	await _frames(2)
-	_check(rival.health == Player.MAX_HEALTH - rule.player, "the crowbar only reaches arm's length")
+	_check(absf(rival.health - expected) < 0.01, "the knife only reaches arm's length")
 	rival.global_position = player.global_position + aim * 1.5
 	await _frames(2)
-	main.run._weapon("crowbar", origin, aim)
+	main.run._melee(origin, aim, false)
 	await _frames(2)
-	_check(rival.is_dead, "a crowbar finishes them off")
+	_check(rival.is_dead, "a knife finishes them off")
 	await _end_run(main)
 
 
@@ -928,33 +1126,61 @@ func _test_traps() -> void:
 	mat.queue_free()
 	await _end_run(main)
 
-	# Thin ice on the station: cracks first, breaks on the next step, the water chills you.
-	Run.forced_map = "station"
+	# The subway's traps, on the island platform.
+	Run.forced_map = "subway"
 	main = await _new_run()
-	var station := main.level as ResearchStation
+	var subway := main.level as SubwayStation
 	player = main.player
 	if main.colossus != null:
 		main.colossus.process_mode = Node.PROCESS_MODE_DISABLED
-	player.global_position = Vector3(0, 0.1, 6)
+	subway.next_train = 9999.0
+	player.global_position = Vector3(11, 0.1, -3)
 	player.velocity = Vector3.ZERO
 	await _frames(20)
-	var ice_at := Vector3(0, player.global_position.y, 9)
-	var ice: ThinIce = Traps.create("thin_ice", station, ice_at, 0.0, 10)
-	player.global_position = ice_at + Vector3.UP * 0.05
-	await _frames(3)
-	_check(ice.state == ThinIce.CRACKED, "thin ice: the first step cracks it")
-	player.global_position = ice_at + Vector3(0, 0.05, 2.5)
-	await _frames(3)
-	station.body_heat = 60.0
-	player.global_position = ice_at + Vector3.UP * 0.05
-	await _frames(3)
-	_check(ice.state == ThinIce.BROKEN, "thin ice: the second step breaks through")
-	_check(player.trap_slow > 0.0 and station.body_heat < 50.0, "thin ice: freezing water slows you and steals body heat (%d)" % station.body_heat)
-	var icicles: Icicles = Traps.create("icicles", station, ice_at + Vector3(4, 0, 0), 0.0, 11)
+	var rail_at := Vector3(11, player.global_position.y - 0.05, -3.5)
+	var rail: ThirdRail = Traps.create("third_rail", subway, rail_at, 0.0, 10)
 	player.health = Player.MAX_HEALTH
-	player.global_position = ice_at + Vector3(4, 0.05, 0)
+	ear.heard.clear()
+	player.global_position = rail_at + Vector3(0, 0.05, 0.1)
+	player.velocity = Vector3.ZERO
+	await _frames(3)
+	_check(player.health < Player.MAX_HEALTH and player.velocity.length() > 2.0 and ear.loudest(GameNoise.Kind.IMPACT) >= 15.0,
+		"third rail: stepping on it throws you back with a bang (hp=%d)" % player.health)
+	subway.set_power(false)
 	await _frames(60)
-	_check(icicles.state == Icicles.FALLEN and player.health < Player.MAX_HEALTH, "icicles: they drop on you if you linger (hp=%d)" % player.health)
+	player.health = Player.MAX_HEALTH
+	player.global_position = rail_at + Vector3(0, 0.05, 0.1)
+	player.velocity = Vector3.ZERO
+	await _frames(5)
+	_check(player.health == Player.MAX_HEALTH, "third rail: dead when the power is cut")
+	subway.set_power(true)
+	rail.queue_free()
+	var tiles: CeilingTiles = Traps.create("ceiling_tiles", subway, Vector3(11, rail_at.y, 3), 0.0, 11, {"ceiling": 5.0})
+	player.health = Player.MAX_HEALTH
+	player.global_position = Vector3(11, rail_at.y + 0.05, 3)
+	player.velocity = Vector3.ZERO
+	await _frames(70)
+	_check(tiles.state == CeilingTiles.FALLEN and player.health < Player.MAX_HEALTH, "ceiling tiles: they come down if you linger (hp=%d)" % player.health)
+	tiles.queue_free()
+	var stile: Turnstile = Traps.create("turnstile", subway, Vector3(17, rail_at.y, 3), 0.0, 12, {"width": 3.4})
+	player.global_position = Vector3(17, rail_at.y + 0.05, 4.5)
+	player.velocity = Vector3.ZERO
+	await _frames(3)
+	ear.heard.clear()
+	player.global_position = Vector3(17, rail_at.y + 0.05, 3.1)
+	await _frames(3)
+	_check(stile.state == Turnstile.ALARM and ear.loudest(GameNoise.Kind.MACHINE) >= 35.0, "turnstile: pushing through upright sets off the fare alarm")
+	stile.queue_free()
+	var quiet: Turnstile = Traps.create("turnstile", subway, Vector3(23, rail_at.y, 3), 0.0, 13, {"width": 3.4})
+	player.global_position = Vector3(23, rail_at.y + 0.05, 4.5)
+	Input.action_press("crouch")
+	await _frames(5)
+	ear.heard.clear()
+	player.global_position = Vector3(23, rail_at.y + 0.05, 3.1)
+	await _frames(3)
+	Input.action_release("crouch")
+	_check(quiet.state == Turnstile.IDLE and ear.loudest(GameNoise.Kind.MACHINE) < 1.0, "turnstile: ducking under the bars is silent")
+	quiet.queue_free()
 	await _end_run(main)
 	ear.queue_free()
 	Run.forced_map = "factory"
@@ -997,8 +1223,8 @@ func _test_maps() -> void:
 		match id:
 			"mall":
 				await _test_mall(main, level, player)
-			"station":
-				await _test_station(main, level as ResearchStation, player)
+			"subway":
+				await _test_subway(main, level as SubwayStation, player)
 			"afternoon":
 				await _test_afternoon(main, level as EndlessAfternoon, player)
 		await _end_run(main)
@@ -1044,24 +1270,45 @@ func _test_mall(_main: Node, level: GameMap, player: Player) -> void:
 	_check(mall._announce_timer > 0.0, "mall: the PA makes an announcement")
 
 
-func _test_station(_main: Node, station: ResearchStation, player: Player) -> void:
-	_check(not station.is_outdoors(station.player_spawn), "station: spawn is indoors")
-	player.global_position = Vector3(0, 0.1, 6)
+func _test_subway(main: Node, subway: SubwayStation, player: Player) -> void:
+	_check(subway.lift_called and subway.next_train <= 35.0, "subway: restoring power calls the lift and the next train")
+	# The last train: a warning first, then it sweeps the line it named.
+	subway.warn_time = 1.0
+	var monster: Node3D = main.colossus
+	monster.process_mode = Node.PROCESS_MODE_DISABLED
+	monster.global_position = Vector3(10, -0.8, SubwayStation.TRACK_Z)
+	var hp_before: float = monster.get_meta("hp", 1e9)
+	player.global_position = Vector3(-10, -0.8, SubwayStation.TRACK_Z)
 	player.velocity = Vector3.ZERO
-	await _frames(5)
-	var start := station.body_heat
-	await _frames(120)
-	_check(station.body_heat < start - 1.0, "station: the cold drains body heat outside (%d -> %d)" % [start, station.body_heat])
-	_check(station.status_text().contains("室外"), "station: HUD shows body heat (%s)" % station.status_text())
-	player.global_position = Vector3(-24.0, 0.1, 0.5)
-	var cold := station.body_heat
-	await _frames(120)
-	_check(station.body_heat > cold + 1.0, "station: a stove warms you back up (%d -> %d)" % [cold, station.body_heat])
-	player.global_position = Vector3(0, 0.1, 6)
-	station.body_heat = 0.0
-	var hp := player.health
-	await _frames(200)
-	_check(player.health < hp, "station: freezing hurts (hp=%d)" % player.health)
+	player.health = Player.MAX_HEALTH
+	subway.host_call_train(1, 1)
+	await _frames(3)
+	_check(subway.train_state == "warning" and subway.status_text().contains("北側"), "subway: the last train is announced first (%s)" % subway.status_text())
+	_check(player.health == Player.MAX_HEALTH, "subway: nothing is hit during the warning")
+	for i in 400:
+		await _frames(1)
+		if subway.train_state == "passing":
+			if player.health < Player.MAX_HEALTH:
+				break
+			player.global_position = Vector3(-10, -0.8, SubwayStation.TRACK_Z)
+	_check(player.health < Player.MAX_HEALTH and player.velocity.length() > 5.0, "subway: the train throws you off the tracks (hp=%d)" % player.health)
+	var waited := 0
+	while subway.train_state != "idle" and waited < 400:
+		await _frames(1)
+		waited += 1
+	_check(subway.train_state == "idle" and subway.trains_passed == 1, "subway: the train passes and is gone")
+	_check(not is_instance_valid(monster) or float(monster.get_meta("hp", 1e9)) < hp_before or TimeWarp.is_stunned(monster),
+		"subway: the train hits monsters on the line")
+	# Standing on the platform, nobody is touched.
+	player.health = Player.MAX_HEALTH
+	player.global_position = Vector3(0, 0.1, 2.0)
+	player.velocity = Vector3.ZERO
+	subway.host_call_train(1, -1)
+	waited = 0
+	while subway.train_state != "idle" and waited < 600:
+		await _frames(1)
+		waited += 1
+	_check(player.health == Player.MAX_HEALTH and subway.trains_passed == 2, "subway: the platform is safe while it passes")
 
 
 func _test_afternoon(main: Node, dream: EndlessAfternoon, player: Player) -> void:
@@ -1108,7 +1355,7 @@ func _end_run(main: Node) -> void:
 
 func _test_player_basics() -> void:
 	print("player")
-	var main = await _new_run({"weapon": "crowbar", "boosts": ["spring_boots"]})
+	var main = await _new_run({"boosts": ["spring_boots"]})
 	var player: Player = main.player
 	# Park the monster far away and asleep for the movement tests.
 	main.colossus.process_mode = Node.PROCESS_MODE_DISABLED
@@ -1174,12 +1421,12 @@ func _test_player_basics() -> void:
 	await _frames(120)
 	_check(player.health < Player.MAX_HEALTH, "falling without spring boots hurts (hp=%.0f)" % player.health)
 
-	# Crowbar opens a locker and drops loot.
+	# Everyone's knife pries a locker open and it drops loot.
 	var locker: Locker = main.level.lockers[0]
 	var loot_before := get_nodes_in_group("loot").size()
 	locker.interact(player)
 	await _frames(5)
-	_check(locker.is_open and get_nodes_in_group("loot").size() > loot_before, "crowbar pries a locker open")
+	_check(locker.is_open and get_nodes_in_group("loot").size() > loot_before, "the knife pries a locker open")
 	await _end_run(main)
 
 
@@ -1238,7 +1485,10 @@ func _test_colossus() -> void:
 func _test_extraction() -> void:
 	print("extraction")
 	GameState.reset()
-	var main = await _new_run({"weapon": "slingshot", "boosts": []})
+	GameState.money = 2000
+	GameState.equip_build({"frame": "nail_gun", "parts": {"barrel": "long_barrel"}})
+	var money_before := GameState.money
+	var main = await _new_run(GameState.consume_equipped())
 	var player: Player = main.player
 	main.colossus.process_mode = Node.PROCESS_MODE_DISABLED
 	main.colossus.global_position = Vector3(0, 0, -100)
@@ -1256,20 +1506,22 @@ func _test_extraction() -> void:
 		await physics_frame
 		waited += 1
 	_check(not main.run_active and main.last_result.survived, "extraction ends the run alive")
-	_check(GameState.money == GameState.START_MONEY + value, "extraction pays the loot value ($%d)" % GameState.money)
-	_check(GameState.owned("slingshot") == 1, "surviving gear returns to the stash")
+	_check(GameState.money == money_before + value, "extraction pays the loot value ($%d)" % GameState.money)
+	_check(GameState.owned("nail_gun") == 1 and GameState.owned("long_barrel") == 1, "the surviving build returns to the stash")
 	await _end_run(main)
 
 
 func _test_death() -> void:
 	print("death")
 	GameState.reset()
-	var main = await _new_run({"weapon": "crowbar", "boosts": []})
+	GameState.money = 2000
+	GameState.equip_build({"frame": "nail_gun", "parts": {}})
+	var main = await _new_run(GameState.consume_equipped())
 	main.colossus.process_mode = Node.PROCESS_MODE_DISABLED
 	main.time_left = 0.5
 	await _frames(60)
 	_check(main.player.is_dead and not main.run_active, "the boiler explodes when time runs out")
-	_check(GameState.owned("crowbar") == 0 and GameState.deaths == 1, "gear is lost on death")
+	_check(GameState.owned("nail_gun") == 0 and GameState.deaths == 1, "the build is lost on death")
 	await _end_run(main)
 
 

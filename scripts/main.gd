@@ -114,8 +114,13 @@ func _join(address: String) -> void:
 
 
 ## Single player: an offline session with just you in it.
+## loadout = {"build": Arsenal build, "boosts": [ids]}; no build means the free revolver.
 func start_run(loadout: Dictionary) -> void:
-	_pending_loadout = loadout
+	var build = loadout.get("build")
+	_pending_loadout = {
+		"build": Arsenal.clean(build if typeof(build) == TYPE_DICTIONARY else Arsenal.STARTER),
+		"boosts": loadout.get("boosts", []).duplicate(),
+	}
 	session.start_offline()
 	session.begin_run()
 

@@ -12,6 +12,9 @@ signal message(text: String)
 ## Gadget readouts for the HUD (thermometer, heartbeat detector), one per line.
 signal readout_changed(text: String)
 signal died(cause: String)
+## The host confirmed one of this player's shots or stabs landed. result: hit, kill,
+## break (a large monster went down for a while), blocked (armour), player.
+signal hit_confirmed(damage: float, result: String)
 
 const WALK_SPEED := 3.2
 const SPRINT_SPEED := 5.5
@@ -46,7 +49,12 @@ const EXO_EXTRA_CARRY := 15.0
 const IRON_LUNG_DRAIN := 0.67
 const GLIDE_FALL_SPEED := 1.2
 const HEART_RANGE := 15.0
-const RAILGUN_CHARGE := 3.0
+## Seconds the trigger is held to charge a "charge" frame (the railgun).
+const CHARGE_TIME := 2.0
+## Every scavenger's knife (V): short reach, a little damage, stuns small monsters.
+const KNIFE_COOLDOWN := 0.55
+const AIM_WALK := 0.6
+const BASE_FOV := 70.0
 const CAT_EYE_TIME := 30.0
 const REWIND_TIME := 5.0
 const REWIND_STEP := 0.25
@@ -81,12 +89,31 @@ var lantern_on := true:
 		if _lantern != null:
 			_lantern.visible = value
 			_lantern_glow.visible = value
+			_gun_light.visible = value and weapon.get("effects", {}).has("light")
 var display_name := "拾荒者"
 ## Which squad this scavenger is in (set by the spawner on every peer). See Session.SQUADS.
 var squad := 0
 var input_enabled := true
-var weapon_id := ""
-var weapon_ammo := 0
+## The gun this run: an Arsenal build and its finished stats (Arsenal.stats).
+var build: Dictionary = Arsenal.STARTER.duplicate(true)
+var weapon: Dictionary = {}
+var mag_ammo := 0
+var reserve_ammo := 0
+## Seconds left on a reload; 0..1 of a railgun-style charge.
+var reloading := 0.0
+var charge := 0.0
+var aiming := false
+## Scripts and tests can hold the trigger or the aim button without real input.
+var hold_trigger := false
+var force_aim := false
+## Replicated: the build as JSON, so other players see the gun in this player's hand.
+var gun_code := "":
+	set(value):
+		gun_code = value
+		_show_body_gun()
+## A light bolted under the barrel, on whenever the lantern is (moths fly at either).
+var gun_light_on: bool:
+	get: return lantern_on and gun_code.contains("flashlight")
 var boosts: Array[String] = []
 ## Replicated: what's in the backpack, so the host's monsters can react to it.
 var carried_ids := PackedInt32Array()
@@ -123,7 +150,19 @@ var _fall_speed := 0.0
 var _shake := 0.0
 var _adrenaline := 0.0
 var _crash := 0.0
-var _weapon_cooldown := 0.0
+var _fire_cooldown := 0.0
+var _melee_cooldown := 0.0
+var _trigger_was_held := false
+var _shot_count := 0
+var _recoil := 0.0
+var _bloom := 0.0
+var _view: ViewModel
+var _gun_light: SpotLight3D
+var _body_gun: Node3D
+var _body_muzzle := Vector3(0, 0.08, -0.6)
+var _thermal := false
+var _thermal_timer := 0.0
+var _shot_rng := RandomNumberGenerator.new()
 var _bitten := 0.0
 var _hot_timer := HOT_INTERVAL
 var _use_cooldown := {}
@@ -136,7 +175,6 @@ var _readout_timer := 0.0
 var _readout := ""
 var _candle: OmniLight3D
 var _candle_on := false
-var _charge := 0.0
 var _cat_eye := 0.0
 var _cat_eye_after := 0.0
 var _rewind: Array[Vector3] = []
@@ -180,6 +218,20 @@ func _ready() -> void:
 	_lantern.position = Vector3(0.2, -0.2, 0.0)
 	_camera.add_child(_lantern)
 
+	_view = ViewModel.new()
+	_view.name = "ViewModel"
+	_camera.add_child(_view)
+
+	_gun_light = SpotLight3D.new()
+	_gun_light.light_color = Color(0.9, 0.95, 1.0)
+	_gun_light.light_energy = 2.4
+	_gun_light.spot_range = 22.0
+	_gun_light.spot_angle = 13.0
+	_gun_light.shadow_enabled = true
+	_gun_light.position = Vector3(0.1, -0.12, -0.2)
+	_gun_light.visible = false
+	_camera.add_child(_gun_light)
+
 	_lantern_glow = OmniLight3D.new()
 	_lantern_glow.light_color = _lantern.light_color
 	_lantern_glow.light_energy = 0.35
@@ -222,6 +274,7 @@ func _ready() -> void:
 	var local := is_multiplayer_authority()
 	_camera.current = local
 	_body.visible = not local
+	_view.visible = local
 	_name_label.text = display_name
 	set_physics_process(local)
 	if not local:
@@ -272,12 +325,13 @@ func build_sync() -> void:
 	sync.name = "Sync"
 	var config := SceneReplicationConfig.new()
 	for path in [".:position", ".:rotation", "Head:rotation", ".:is_crouching", ".:lantern_on",
-			".:is_dead", ".:extracted", ".:display_name", ".:carried_ids", ".:carried_tags"]:
+			".:is_dead", ".:extracted", ".:display_name", ".:carried_ids", ".:carried_tags", ".:gun_code"]:
 		var node_path := NodePath(path)
 		config.add_property(node_path)
 		# Child nodes don't exist yet when spawn state is applied; sync them afterwards only.
 		config.property_set_spawn(node_path, not path.begins_with("Head"))
-		config.property_set_replication_mode(node_path, SceneReplicationConfig.REPLICATION_MODE_ALWAYS)
+		config.property_set_replication_mode(node_path, SceneReplicationConfig.REPLICATION_MODE_ON_CHANGE
+			if path == ".:gun_code" else SceneReplicationConfig.REPLICATION_MODE_ALWAYS)
 	sync.replication_config = config
 	sync.set_multiplayer_authority(get_multiplayer_authority())
 	add_child(sync)
@@ -336,9 +390,14 @@ func _build_body() -> void:
 		Vector2(0.12, 0.11), Vector2(0.06, 0.15), Vector2(0.0, 0.16)]), 8), leather, Vector3(0, 1.67, -0.08), Vector3(-10, 22.5, 0))
 	add.call(LowPoly.extrude(PackedVector2Array([Vector2(-0.12, 0.0), Vector2(0.12, 0.0), Vector2(0.09, 0.08),
 		Vector2(0.0, 0.1), Vector2(-0.09, 0.08)]), 0.02), leather, Vector3(0, 1.69, -0.2), Vector3(-80, 0, 0))
-	# Arms in the coat's sleeves: the left hangs, the right holds the lantern out in front.
-	add.call(LowPoly.prism(5, 0.06, 0.085, 0.6), coat, Vector3(-0.27, 1.12, -0.04), Vector3(-8, 0, -10))
-	add.call(LowPoly.blob(0.055, Vector3(0.9, 1.1, 0.9), 0), skin, Vector3(-0.32, 0.8, -0.08))
+	# Arms in the coat's sleeves: the left holds the gun forward, the right the lantern.
+	add.call(LowPoly.prism(5, 0.06, 0.085, 0.36), coat, Vector3(-0.27, 1.24, -0.1), Vector3(-45, 0, -6))
+	add.call(LowPoly.prism(5, 0.055, 0.065, 0.32), coat, Vector3(-0.25, 1.12, -0.3), Vector3(-82, 0, 0))
+	add.call(LowPoly.blob(0.055, Vector3(0.9, 1.1, 0.9), 0), skin, Vector3(-0.24, 1.1, -0.46))
+	_body_gun = Node3D.new()
+	_body_gun.name = "Gun"
+	_body_gun.position = Vector3(-0.24, 1.09, -0.47)
+	_body.add_child(_body_gun)
 	add.call(LowPoly.prism(5, 0.06, 0.085, 0.36), coat, Vector3(0.27, 1.22, -0.1), Vector3(-35, 0, 8))
 	add.call(LowPoly.prism(5, 0.055, 0.065, 0.34), coat, Vector3(0.29, 1.02, -0.29), Vector3(-75, 0, 0))
 	add.call(LowPoly.blob(0.055, Vector3(0.9, 1.1, 0.9), 0), skin, Vector3(0.29, 0.98, -0.47))
@@ -383,6 +442,35 @@ func remote_damage(amount: float, cause: String, note := "") -> void:
 	take_damage(amount, cause)
 	if note != "" and not is_dead:
 		message.emit(note)
+
+
+## Host -> owner: one of your shots landed (drives the HUD hit marker).
+@rpc("any_peer", "call_local", "reliable")
+func remote_hit(damage: float, result: String) -> void:
+	if not _from_host():
+		return
+	hit_confirmed.emit(damage, result)
+	if result == "kill" or result == "break":
+		Sfx.play_2d(self, "tick", -4.0, 0.6)
+	elif result != "blocked":
+		Sfx.play_2d(self, "tick", -12.0, 1.7)
+
+
+## Host -> owner: the vampire charm feeds you a little of the damage you dealt.
+@rpc("any_peer", "call_local", "reliable")
+func remote_heal(amount: float) -> void:
+	if not _from_host() or is_dead:
+		return
+	health = minf(health + amount, MAX_HEALTH)
+	health_changed.emit(health / MAX_HEALTH)
+
+
+## Host -> owner: a monster or a blast shoved you.
+@rpc("any_peer", "call_local", "reliable")
+func remote_push(push: Vector3) -> void:
+	if not _from_host() or is_dead:
+		return
+	velocity += push
 
 
 ## Host -> owner: a moth put the lantern out.
@@ -520,15 +608,25 @@ func _process(delta: float) -> void:
 			Sfx.play_3d(get_parent(), global_position, "step", volume, 20.0, randf_range(0.85, 1.15))
 
 
-## Equips carry-in gear for this run. loadout = {"weapon": id, "boosts": [ids]}.
+## Equips carry-in gear for this run. loadout = {"build": Arsenal build, "boosts": [ids]}.
+## A loadout with no build (or an old {"weapon": ...} one) gets the free revolver.
 func equip(loadout: Dictionary) -> void:
-	weapon_id = loadout.get("weapon", "")
-	weapon_ammo = Gear.info(weapon_id).get("ammo", 0)
-	_weapon_cooldown = 0.0
-	_charge = 0.0
+	var given = loadout.get("build")
+	build = Arsenal.clean(given if typeof(given) == TYPE_DICTIONARY else Arsenal.STARTER)
+	weapon = Arsenal.stats(build)
+	mag_ammo = weapon.mag
+	reserve_ammo = weapon.reserve
+	reloading = 0.0
+	charge = 0.0
+	_fire_cooldown = 0.0
+	_shot_count = 0
 	boosts.clear()
 	for id in loadout.get("boosts", []):
 		boosts.append(id)
+	gun_code = JSON.stringify(build)
+	if _view != null:
+		_view.set_build(build)
+	lantern_on = lantern_on
 	_recalculate()
 	gear_changed.emit()
 	if has_gear("rabbit_foot") and is_multiplayer_authority() and Run.instance != null:
@@ -536,17 +634,19 @@ func equip(loadout: Dictionary) -> void:
 		message.emit("幸運符在發燙…這局好東西比較多，但怪物也多了一隻。")
 
 
-## Gear the player still has (consumed items are gone), returned on extraction.
+## Gear the player still has (consumed items are gone), returned on extraction:
+## the weapon's frame and parts, then the boosts. The free revolver never counts.
 func remaining_gear() -> Array[String]:
 	var ids: Array[String] = []
-	if weapon_id != "":
-		ids.append(weapon_id)
+	for id in Arsenal.ids(build):
+		if Arsenal.price_of(id) > 0:
+			ids.append(id)
 	ids.append_array(boosts)
 	return ids
 
 
 func has_gear(id: String) -> bool:
-	return weapon_id == id or id in boosts
+	return id in boosts or id in Arsenal.ids(build)
 
 
 ## Mouse look, called by the main scene so it works through the low-res SubViewport.
@@ -598,9 +698,9 @@ func _physics_process(delta: float) -> void:
 
 	if is_multiplayer_authority():
 		ground_speed = Vector2(velocity.x, velocity.z).length()
-	_weapon_cooldown = maxf(_weapon_cooldown - delta, 0.0)
 	_bitten = maxf(_bitten - delta, 0.0)
 	_update_boost_timers(delta)
+	_update_weapon(delta)
 	var climbing := _ladders > 0
 
 	if not is_on_floor() and not climbing:
@@ -641,6 +741,8 @@ func _physics_process(delta: float) -> void:
 	if _heavy_slowed():
 		speed *= HEAVY_FACTOR
 	speed *= _weight_factor()
+	if aiming:
+		speed *= AIM_WALK
 	if trap_slow > 0.0:
 		trap_slow -= delta
 		speed *= trap_slow_factor
@@ -679,8 +781,6 @@ func _physics_process(delta: float) -> void:
 		set_lantern(not lantern_on)
 	if Input.is_action_just_pressed("drop"):
 		drop_last()
-	if Input.is_action_just_pressed("use_weapon"):
-		use_weapon()
 	if Input.is_action_just_pressed("use_boost"):
 		use_boost()
 	if Input.is_action_just_pressed("use_item"):
@@ -733,68 +833,194 @@ func set_lantern(on: bool) -> void:
 	lantern_on = on
 
 
-func use_weapon() -> void:
-	if weapon_id == "" or _weapon_cooldown > 0.0:
-		return
+# --- Weapon: the build's gun and the knife ------------------------------------------
+
+## One pull of the trigger. Host resolves what it hits (Run.request_shot). False when
+## it didn't fire (cooling down, reloading, empty: an empty pull starts a reload).
+func fire() -> bool:
+	if weapon.is_empty() or reloading > 0.0 or _fire_cooldown > 0.0 or is_dead:
+		return false
 	if _bitten > 0.0:
-		message.emit("手被咬住了，用不了武器！")
+		message.emit("手被咬住了，開不了槍！")
+		_fire_cooldown = 0.5
+		return false
+	if mag_ammo <= 0:
+		_fire_cooldown = 0.3
+		Sfx.play_2d(self, "tick", -6.0, 1.3)
+		if reserve_ammo > 0:
+			reload()
+		else:
+			message.emit("%s沒有子彈了。只剩小刀（V）。" % Arsenal.name_of(build.frame))
+		return false
+	_fire_cooldown = 1.0 / maxf(weapon.rate, 0.05)
+	_shot_count += 1
+	var ghost := int(weapon.effects.get("ghost", 0))
+	if ghost <= 0 or _shot_count % ghost != 0:
+		mag_ammo -= 1
+	var origin := _camera.global_position
+	var forward := -_camera.global_basis.z
+	var spread := current_spread()
+	var directions: Array[Vector3] = []
+	for i in int(weapon.pellets):
+		directions.append(Run.scatter(forward, spread, _shot_rng))
+	if Run.instance != null:
+		Run.instance.request_shot(build, origin, directions)
+	var kick: float = weapon.recoil * (0.6 if aiming else 1.0)
+	_recoil = minf(_recoil + kick, 25.0)
+	_bloom = minf(_bloom + kick * 0.35 + weapon.spread * 0.15, 8.0)
+	rotate_y(deg_to_rad(_shot_rng.randf_range(-1.0, 1.0) * kick * 0.15))
+	add_shake(clampf(kick * 0.03, 0.0, 0.35))
+	if _view != null:
+		_view.kick(weapon.recoil, weapon.kind != "cone")
+	return true
+
+
+## R: refill the magazine from the reserve.
+func reload() -> bool:
+	if weapon.is_empty() or reloading > 0.0 or mag_ammo >= int(weapon.mag) or reserve_ammo <= 0 or is_dead:
+		return false
+	reloading = weapon.reload
+	charge = 0.0
+	if _view != null:
+		_view.reload(weapon.reload)
+	Sfx.play_3d(get_parent(), global_position, "clank", -12.0, 12.0, 1.5)
+	GameNoise.emit(get_tree(), global_position, 4.0, GameNoise.Kind.TOOL)
+	return true
+
+
+func _finish_reload() -> void:
+	var take := mini(int(weapon.mag) - mag_ammo, reserve_ammo)
+	mag_ammo += take
+	reserve_ammo -= take
+	Sfx.play_3d(get_parent(), global_position, "clank", -10.0, 12.0, 2.0)
+
+
+## V: the knife. Pries open lockers (and pokes mimics) when you're looking at one;
+## otherwise a short stab the host resolves. The bayonet part makes it hit harder.
+func melee() -> bool:
+	if _melee_cooldown > 0.0 or is_dead:
+		return false
+	if _bitten > 0.0:
+		message.emit("手被咬住了！")
+		return false
+	_melee_cooldown = KNIFE_COOLDOWN
+	if _view != null:
+		_view.stab()
+	if reloading > 0.0:
+		reloading = 0.0
+		if _view != null:
+			_view.cancel_reload()
+	Sfx.play_3d(get_parent(), global_position, "thump", -14.0, 10.0, 2.2)
+	GameNoise.emit(get_tree(), global_position, 3.0, GameNoise.Kind.TOOL)
+	if is_instance_valid(_focused) and _focused.has_method("pry"):
+		_focused.pry(self)
+		return true
+	if Run.instance != null:
+		Run.instance.request_melee(_camera.global_position, -_camera.global_basis.z, weapon.get("effects", {}).has("bayonet"))
+	return true
+
+
+## Degrees of random cone the next shot gets: aiming halves it, moving and firing widen it.
+func current_spread() -> float:
+	if weapon.is_empty():
+		return 0.0
+	var base: float = weapon.spread * (0.5 if aiming else 1.0)
+	var moving := clampf(ground_speed / SPRINT_SPEED, 0.0, 1.0)
+	return base * (1.0 + moving * 0.8) + _bloom * (0.5 if aiming else 1.0)
+
+
+## The camera's field of view right now (narrower while aiming a zoomed sight).
+func view_fov() -> float:
+	return _camera.fov
+
+
+## Where the barrel is: the viewmodel's muzzle for the local player, the gun in the
+## hand for everyone else.
+func muzzle_position() -> Vector3:
+	if is_multiplayer_authority() and _view != null and _view.visible:
+		return _view.muzzle_global()
+	if _body_gun != null and _body_gun.is_inside_tree():
+		return _body_gun.to_global(_body_muzzle)
+	return head_position()
+
+
+## Trigger, aim, reload and knife input, charging, recoil recovery. Owner only.
+func _update_weapon(delta: float) -> void:
+	_fire_cooldown = maxf(_fire_cooldown - delta, 0.0)
+	_melee_cooldown = maxf(_melee_cooldown - delta, 0.0)
+	_recoil = move_toward(_recoil, 0.0, delta * (5.0 + _recoil * 5.0))
+	_bloom = move_toward(_bloom, 0.0, delta * (2.0 + _bloom * 3.0))
+	if reloading > 0.0:
+		reloading -= delta
+		if reloading <= 0.0:
+			reloading = 0.0
+			_finish_reload()
+	var can_act := input_enabled and not is_dead
+	aiming = can_act and reloading <= 0.0 and (force_aim or Input.is_action_pressed("aim"))
+	var held := can_act and (hold_trigger or Input.is_action_pressed("use_weapon"))
+	var pressed := held and not _trigger_was_held
+	_trigger_was_held = held
+	if can_act and Input.is_action_just_pressed("reload"):
+		reload()
+	if can_act and Input.is_action_just_pressed("melee"):
+		melee()
+	if weapon.is_empty():
 		return
-	match weapon_id:
-		"crowbar":
-			_weapon_cooldown = 0.6
-			if is_instance_valid(_focused) and _focused.has_method("pry"):
-				_focused.pry(self)
-			else:
-				Sfx.play_3d(get_parent(), global_position, "clank", -10.0, 20.0, 1.4)
-				_fire()
-		"slingshot":
-			if weapon_ammo <= 0:
-				message.emit("彈珠用完了")
-				return
-			_weapon_cooldown = 0.5
-			weapon_ammo -= 1
-			var marble := Marble.new()
-			get_parent().add_child(marble)
-			marble.global_position = _camera.global_position - _camera.global_basis.z * 0.5
-			marble.linear_velocity = -_camera.global_basis.z * 22.0
-			gear_changed.emit()
-		"boomerang":
-			_weapon_cooldown = 1.5
-			_fire()
-			if randf() < 0.15:
-				weapon_id = ""
-				message.emit("扳手飛回來的時候沒接住…它不見了。")
-				gear_changed.emit()
-		"nail_gun", "flamethrower", "shotgun":
-			if not _spend_ammo():
-				return
-			_weapon_cooldown = {"nail_gun": 0.25, "flamethrower": 0.8, "shotgun": 1.2}[weapon_id]
-			_fire()
-			if weapon_id == "shotgun":
-				add_shake(0.5)
-		"shock_glove":
-			_weapon_cooldown = 15.0
-			_fire()
-			message.emit("滋——！手套沒電了，充電中（15 秒）")
-		"megaphone":
-			_weapon_cooldown = 12.0
-			_fire()
-			add_shake(0.3)
-		"rubber_duck":
-			if not _spend_ammo():
-				return
-			_weapon_cooldown = 1.0
-			if Run.instance != null:
-				Run.instance.request_duck(_camera.global_position - _camera.global_basis.z * 0.5,
-					-_camera.global_basis.z * 9.0 + Vector3.UP * 2.0)
-		"railgun":
-			if weapon_ammo <= 0:
-				message.emit("加農炮已經沒有彈藥了")
-				return
-			if _charge <= 0.0:
-				_charge = RAILGUN_CHARGE
-				Sfx.play_2d(self, "zap", -6.0, 0.5)
-				message.emit("磁軌加農炮充能中…（3 秒）")
+	if weapon.kind == "charge":
+		if held and mag_ammo > 0 and reloading <= 0.0 and _fire_cooldown <= 0.0 and _bitten <= 0.0:
+			if charge == 0.0:
+				Sfx.play_2d(self, "zap", -8.0, 0.5)
+			charge = minf(charge + delta / CHARGE_TIME, 1.0)
+			add_shake(0.02 + charge * 0.04)
+			if charge >= 1.0:
+				charge = 0.0
+				fire()
+		else:
+			charge = 0.0
+			if pressed:
+				fire()
+	elif pressed or (held and weapon.auto):
+		fire()
+	if _view != null:
+		_view.aiming = aiming
+	_update_thermal(delta)
+
+
+## A thermal sight shows every monster through walls (and the invisible ones) while aiming.
+func _update_thermal(delta: float) -> void:
+	var want: bool = aiming and weapon.get("effects", {}).has("thermal")
+	_thermal_timer -= delta
+	if want == _thermal and (not want or _thermal_timer > 0.0):
+		return
+	_thermal_timer = 0.5
+	_thermal = want
+	var overlay := ShotFx.glow(Color(1.0, 0.45, 0.1, 0.55), false, true)
+	for monster in get_tree().get_nodes_in_group("monsters"):
+		if monster.has_method("set_spotted"):
+			monster.set_spotted(want or _cat_eye > 0.0)
+		for mesh in monster.find_children("*", "MeshInstance3D", true, false):
+			var instance := mesh as MeshInstance3D
+			if want and instance.material_overlay == null:
+				instance.material_overlay = overlay
+			elif not want and instance.material_overlay == overlay:
+				instance.material_overlay = null
+
+
+## Remote copies: the gun in the left hand, rebuilt when the replicated build changes.
+func _show_body_gun() -> void:
+	if _body_gun == null:
+		return
+	for child in _body_gun.get_children():
+		child.queue_free()
+	if gun_code == "":
+		return
+	var parsed = JSON.parse_string(gun_code)
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return
+	var model := GunModels.build(parsed)
+	_body_muzzle = GunModels.muzzle_point(parsed)
+	_body_gun.add_child(model)
+	_body_gun.scale = Vector3.ONE * 0.85
 
 
 ## Q: uses the first consumable boost in the loadout.
@@ -941,8 +1167,9 @@ func _recalculate() -> void:
 
 func _gear_weight() -> float:
 	var total := 0.0
-	for id in remaining_gear():
-		total += Gear.info(id).get("weight", 0.0)
+	for id in boosts:
+		total += float(Gear.info(id).get("weight", 0.0))
+	total += float(weapon.get("weight", 0.0))
 	return total
 
 
@@ -990,6 +1217,10 @@ func _update_head(delta: float, moving: bool, speed: float) -> void:
 	_head.position.y = lerpf(_head.position.y, target_height + bob, 12.0 * delta)
 	_shake = maxf(_shake - delta * 1.5, 0.0)
 	_camera.position = Vector3(randf_range(-1, 1), randf_range(-1, 1), 0.0) * _shake * 0.08
+	# Recoil kicks the view up; it settles back as the gun recovers.
+	_camera.rotation.x = deg_to_rad(_recoil)
+	var zoom: float = weapon.get("zoom", 1.0) if aiming else 1.0
+	_camera.fov = lerpf(_camera.fov, BASE_FOV / maxf(zoom, 1.0), minf(14.0 * delta, 1.0))
 
 
 func _update_focus() -> void:
@@ -1292,30 +1523,8 @@ func gliding() -> bool:
 		and Input.is_action_pressed("jump") and velocity.y < 0.0
 
 
-func _spend_ammo() -> bool:
-	if weapon_ammo <= 0:
-		message.emit("%s用完了" % Gear.info(weapon_id).name)
-		return false
-	weapon_ammo -= 1
-	gear_changed.emit()
-	return true
-
-
-func _fire() -> void:
-	if Run.instance != null:
-		Run.instance.request_weapon(weapon_id, _camera.global_position, -_camera.global_basis.z)
-
-
-## Railgun charge, cat-eye drops and the rewind watch's memory of where you were.
+## Cat-eye drops and the rewind watch's memory of where you were.
 func _update_gadgets(delta: float) -> void:
-	if _charge > 0.0:
-		_charge -= delta
-		add_shake(0.05)
-		if _charge <= 0.0 and weapon_id == "railgun" and weapon_ammo > 0:
-			weapon_ammo -= 1
-			_fire()
-			add_shake(0.8)
-			gear_changed.emit()
 	if _cat_eye > 0.0:
 		_cat_eye -= delta
 		_spot_hidden(_cat_eye > 0.0)

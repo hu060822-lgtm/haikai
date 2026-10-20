@@ -35,17 +35,18 @@ static func load_game() -> void:
 	extractions = int(parsed.get("extractions", 0))
 	deaths = int(parsed.get("deaths", 0))
 	best_haul = int(parsed.get("best_haul", 0))
-	# Saves from before weapon builds held old Gear weapons: refund them as money.
+	# Saves from before weapon builds held old Gear weapons: refund them as money (the
+	# ones that share a name with a new frame, like the shotgun, simply become that frame).
 	for id in stash.keys():
-		if Gear.ITEMS.has(id) and Gear.ITEMS[id].slot == "weapon":
-			money += int(Gear.ITEMS[id].price) * int(stash[id])
+		if Gear.LEGACY_WEAPONS.has(id) and not Arsenal.FRAMES.has(id):
+			money += int(Gear.LEGACY_WEAPONS[id]) * int(stash[id])
 			stash.erase(id)
 	equipped = empty_loadout()
 	var saved_loadout = parsed.get("equipped", {})
 	if typeof(saved_loadout) == TYPE_DICTIONARY:
 		var old_weapon := str(saved_loadout.get("weapon", ""))
-		if Gear.ITEMS.has(old_weapon):
-			money += int(Gear.ITEMS[old_weapon].price)
+		if Gear.LEGACY_WEAPONS.has(old_weapon):
+			money += int(Gear.LEGACY_WEAPONS[old_weapon])
 		if typeof(saved_loadout.get("build")) == TYPE_DICTIONARY:
 			equipped.build = Arsenal.clean(saved_loadout.build)
 		for id in saved_loadout.get("boosts", []):

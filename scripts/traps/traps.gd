@@ -21,14 +21,16 @@ const KINDS := {
 		"params": {"width": 1.6}, "script": "res://scripts/traps/alarm_gate.gd"},
 	"tipping_shelf": {"name": "傾倒的貨架", "styles": ["mall"], "footprint": Vector2(1.6, 2.4), "wall": "back",
 		"script": "res://scripts/traps/tipping_shelf.gd"},
-	"thin_ice": {"name": "薄冰", "styles": ["station"], "footprint": Vector2(1.7, 1.7), "script": "res://scripts/traps/thin_ice.gd"},
-	"icicles": {"name": "冰柱", "styles": ["station"], "footprint": Vector2(1.5, 1.0),
-		"script": "res://scripts/traps/icicles.gd"},
+	"third_rail": {"name": "第三軌", "styles": ["subway"], "footprint": Vector2(2.6, 0.9), "script": "res://scripts/traps/third_rail.gd"},
+	"ceiling_tiles": {"name": "鬆脫的天花板", "styles": ["subway"], "footprint": Vector2(1.6, 1.6),
+		"params": {"ceiling": 4.5}, "script": "res://scripts/traps/ceiling_tiles.gd"},
+	"turnstile": {"name": "票務閘門", "styles": ["subway"], "footprint": Vector2(3.4, 1.1), "doorway": true,
+		"params": {"width": 3.4}, "script": "res://scripts/traps/turnstile.gd"},
 	"music_box": {"name": "自己會響的音樂盒", "styles": ["dream"], "footprint": Vector2(0.3, 0.3), "script": "res://scripts/traps/music_box.gd"},
 	"squeak_floor": {"name": "會叫的軟地墊", "styles": ["dream"], "footprint": Vector2(1.6, 1.6), "script": "res://scripts/traps/squeak_floor.gd"},
 }
 
-const STYLES := ["factory", "mall", "station", "dream", "any"]
+const STYLES := ["factory", "mall", "subway", "dream", "any"]
 
 
 ## Builds a trap of `kind` at pos (map space), adds it under `map` and lists it in

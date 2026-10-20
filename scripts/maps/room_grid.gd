@@ -29,7 +29,7 @@ const SHAPES := {
 var map: GameMap
 var rng: RandomNumberGenerator
 var name := "sprawl"
-## Which trap set and look to use: factory, mall, station, dream.
+## Which trap set and look to use: factory, mall, subway, dream.
 var style := "any"
 ## The grid's corner; lines every CELL metres from here. Floor height is origin.y.
 var origin := Vector3.ZERO
@@ -51,7 +51,7 @@ var trap_chance := 0.22
 ## Weights for corridor / room / hall, on top of SHAPES.
 var shape_weights := {}
 ## floor, floor_tint, wall, wall_tint, inner_wall, roof, roof_tint, light, light_energy,
-## density, wall_thickness, clutter (a RoomKits.clutter set), clutter_chance, roofless_chance
+## density, wall_density, wall_thickness, clutter (a RoomKits.clutter set), clutter_chance, roofless_chance
 var theme := {}
 ## Room kits: {name, weight, build: Callable(grid, room), min_depth, max_count, min_cells
 ## (in 12x12 m units), shape ("corridor"/"room"/"hall", or an array), deep, floor, floor_tint,
@@ -539,7 +539,8 @@ func _wall_run(key: Array, edges: Array, thickness: float) -> void:
 			if absf(across - at) < 0.05 and along > 0.0 and along < from.distance_to(to):
 				openings.append([along, door.size.x, door.size.y])
 	var texture: String = theme.get("inner_wall", theme.get("wall", "brick")) if inner else theme.get("wall", "brick")
-	map._wall(from, to, wall_height, texture, openings, thickness, theme.get("wall_tint", Color.WHITE))
+	map._wall(from, to, wall_height, texture, openings, thickness, theme.get("wall_tint", Color.WHITE), Layers.WORLD,
+		theme.get("wall_density", 0.5))
 
 
 ## Moves each port's doorway onto its room's own wall, which may stand a little off the

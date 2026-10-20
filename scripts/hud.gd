@@ -12,11 +12,24 @@ const HELP_SECONDS := 10.0
 const CONTROLS := [
 	["WASD", "移動"], ["滑鼠", "看"], ["Shift", "衝刺"], ["Ctrl", "蹲下"],
 	["空白", "跳"], ["E", "撿起／互動"], ["G", "丟下"], ["F", "提燈"],
-	["左鍵", "武器"], ["Q", "強化"], ["R", "用物品"], ["M", "麥克風"],
+	["左鍵", "開槍"], ["右鍵", "瞄準"], ["R", "換彈"], ["V", "小刀"],
+	["Q", "強化"], ["X", "用物品"], ["M", "麥克風"],
 ]
+const HIT_TIME := 0.28
 
 var _root: Control
 var _crosshair: Control
+var _ticks: Array[ColorRect] = []
+var _hit_marker: Control
+var _hit_lines: Array[ColorRect] = []
+var _hit_number: Label
+var _hit_timer := 0.0
+var _weapon_panel: PanelContainer
+var _weapon_name: Label
+var _ammo: Label
+var _reserve: Label
+var _reload_bar: ProgressBar
+var _weapon_hint: Label
 var _prompt: Label
 var _prompt_key: PanelContainer
 var _prompt_key_label: Label
@@ -142,6 +155,31 @@ func _build_centre() -> void:
 	core.size = Vector2(2.0, 2.0)
 	core.position = Vector2(-1.0, -1.0)
 	_crosshair.add_child(core)
+	# Four ticks that spread apart with the gun's spread (see _update_crosshair).
+	for i in 4:
+		var shadow := ColorRect.new()
+		shadow.color = Color(0.0, 0.0, 0.0, 0.55)
+		_crosshair.add_child(shadow)
+		var tick := ColorRect.new()
+		tick.color = Color(UiKit.TEXT, 0.85)
+		shadow.add_child(tick)
+		tick.position = Vector2(1.0, 1.0)
+		_ticks.append(shadow)
+	# The hit marker: an X round the crosshair, and the damage under it.
+	_hit_marker = Control.new()
+	_crosshair.add_child(_hit_marker)
+	for i in 4:
+		var line := ColorRect.new()
+		line.size = Vector2(9.0, 2.0)
+		line.pivot_offset = Vector2(0.0, 1.0)
+		line.rotation = PI / 4.0 + PI / 2.0 * i
+		line.position = Vector2.from_angle(line.rotation) * 7.0 - Vector2(0.0, 1.0)
+		_hit_marker.add_child(line)
+		_hit_lines.append(line)
+	_hit_number = _text("", 14, UiKit.TEXT, true)
+	_hit_number.position = Vector2(12.0, 6.0)
+	_hit_marker.add_child(_hit_number)
+	_hit_marker.visible = false
 
 	var stack := VBoxContainer.new()
 	stack.add_theme_constant_override("separation", 6)
@@ -242,6 +280,35 @@ func _build_bottom_right() -> void:
 	_readout.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_readout.size_flags_horizontal = Control.SIZE_SHRINK_END
 	stack.add_child(_readout)
+	_weapon_panel = _panel(UiKit.HOT)
+	_weapon_panel.size_flags_horizontal = Control.SIZE_SHRINK_END
+	var weapon_box := VBoxContainer.new()
+	weapon_box.add_theme_constant_override("separation", 2)
+	_weapon_panel.add_child(weapon_box)
+	_weapon_name = _text("", 13, UiKit.HOT, true)
+	_weapon_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_weapon_name.size_flags_horizontal = Control.SIZE_SHRINK_END
+	weapon_box.add_child(_weapon_name)
+	var ammo_row := HBoxContainer.new()
+	ammo_row.add_theme_constant_override("separation", 6)
+	ammo_row.alignment = BoxContainer.ALIGNMENT_END
+	ammo_row.size_flags_horizontal = Control.SIZE_SHRINK_END
+	_ammo = _text("", 34, UiKit.TEXT, true)
+	_ammo.add_theme_font_override("font", UiKit.display_font())
+	ammo_row.add_child(_ammo)
+	_reserve = _text("", 18, UiKit.DIM, true)
+	_reserve.size_flags_vertical = Control.SIZE_SHRINK_END
+	ammo_row.add_child(_reserve)
+	weapon_box.add_child(ammo_row)
+	_reload_bar = _bar(UiKit.WARN, Vector2(170.0, 5.0))
+	_reload_bar.size_flags_horizontal = Control.SIZE_SHRINK_END
+	_reload_bar.modulate.a = 0.0
+	weapon_box.add_child(_reload_bar)
+	_weapon_hint = _text("R 換彈　V 小刀　右鍵 瞄準", 12, UiKit.DIM)
+	_weapon_hint.size_flags_horizontal = Control.SIZE_SHRINK_END
+	weapon_box.add_child(_weapon_hint)
+	_weapon_panel.visible = false
+	stack.add_child(_weapon_panel)
 	var panel := _panel(UiKit.ACCENT)
 	panel.size_flags_horizontal = Control.SIZE_SHRINK_END
 	_gear = VBoxContainer.new()
@@ -290,6 +357,7 @@ func bind_player(player: Player) -> void:
 	player.gear_changed.connect(_on_gear_changed)
 	player.message.connect(show_message)
 	player.readout_changed.connect(func(text: String) -> void: _readout.text = text)
+	player.hit_confirmed.connect(show_hit)
 	_on_inventory_changed(player.items, player.carried_weight, player.carried_value)
 	_on_gear_changed()
 
@@ -337,7 +405,7 @@ func set_voice(state: String) -> void:
 	_voice.visible = _voice.text != ""
 
 
-## A map-specific line under the objective (body heat on the ice station).
+## A map-specific line under the objective (the last train warning on the subway).
 func set_status(text: String) -> void:
 	if text == _status.text:
 		return
@@ -390,6 +458,95 @@ func _process(delta: float) -> void:
 	_help.modulate.a = move_toward(_help.modulate.a, target * (1.0 if held else minf(_help_timer, 1.0)), delta * 4.0)
 	_help.visible = _help.modulate.a > 0.01
 	_help_hint.modulate.a = 0.0 if _help.visible else 0.55
+	_update_weapon(delta)
+
+
+## A shot or stab landed: flash the X (red on a kill, orange when a big one breaks).
+func show_hit(damage: float, result: String) -> void:
+	_hit_timer = HIT_TIME
+	var color := UiKit.TEXT
+	match result:
+		"kill":
+			color = UiKit.DANGER
+		"break":
+			color = UiKit.WARN
+		"blocked":
+			color = UiKit.DIM
+		"player":
+			color = UiKit.HOT
+	for line in _hit_lines:
+		line.color = color
+	_hit_number.add_theme_color_override("font_color", color)
+	match result:
+		"kill":
+			_hit_number.text = "%d　擊殺" % roundi(damage)
+		"break":
+			_hit_number.text = "%d　打倒了！" % roundi(damage)
+		"blocked":
+			_hit_number.text = "擋下了"
+		_:
+			_hit_number.text = "%d" % maxi(roundi(damage), 1)
+	_hit_number.reset_size()
+	_hit_marker.visible = true
+
+
+func _update_weapon(delta: float) -> void:
+	_hit_timer = maxf(_hit_timer - delta, 0.0)
+	_hit_marker.visible = _hit_timer > 0.0
+	if _hit_marker.visible:
+		var t := _hit_timer / HIT_TIME
+		_hit_marker.modulate.a = clampf(t * 1.6, 0.0, 1.0)
+		_hit_marker.scale = Vector2.ONE * (1.0 + (t - 0.6) * 0.5 if t > 0.6 else 1.0)
+		_hit_number.position.y = 6.0 + (1.0 - t) * 10.0
+	var player := _player
+	if player == null or not is_instance_valid(player) or player.weapon.is_empty():
+		_weapon_panel.visible = false
+		_update_crosshair(0.0)
+		return
+	_weapon_panel.visible = true
+	var stats: Dictionary = player.weapon
+	_weapon_name.text = Arsenal.name_of(player.build.frame)
+	_ammo.text = str(player.mag_ammo)
+	_reserve.text = "/ %d" % player.reserve_ammo
+	var empty := player.mag_ammo <= 0
+	_ammo.add_theme_color_override("font_color", UiKit.DANGER if empty else (UiKit.WARN if player.mag_ammo <= maxi(int(stats.mag) / 4, 1) else UiKit.TEXT))
+	var bar := 0.0
+	if player.reloading > 0.0:
+		bar = 1.0 - player.reloading / maxf(float(stats.reload), 0.01)
+		_set_bar_color(_reload_bar, UiKit.WARN)
+		_weapon_hint.text = "換彈中…"
+	elif player.charge > 0.0:
+		bar = player.charge
+		_set_bar_color(_reload_bar, UiKit.COLD)
+		_weapon_hint.text = "充能中…放開就取消"
+	elif empty and player.reserve_ammo > 0:
+		_weapon_hint.text = "沒子彈了！按 R 換彈"
+	elif empty:
+		_weapon_hint.text = "子彈打光了。只剩小刀（V）"
+	else:
+		_weapon_hint.text = "R 換彈　V 小刀　右鍵 瞄準" if stats.kind != "charge" else "按住左鍵充能　V 小刀"
+	_weapon_hint.add_theme_color_override("font_color", UiKit.DANGER if empty and player.reloading <= 0.0 else UiKit.DIM)
+	_reload_bar.value = bar
+	_reload_bar.modulate.a = 1.0 if bar > 0.0 else 0.0
+	_update_crosshair(player.current_spread(), player.view_fov(), player.aiming)
+
+
+## Crosshair ticks sit as far out as the shot's random cone reaches on screen.
+func _update_crosshair(spread: float, fov := 70.0, aiming := false) -> void:
+	var height := _root.size.y if _root.size.y > 0.0 else 720.0
+	var gap := 4.0 + tan(deg_to_rad(spread)) / tan(deg_to_rad(fov) * 0.5) * height * 0.5
+	gap = clampf(gap, 4.0, 120.0)
+	var length := 5.0 if aiming else 7.0
+	var dirs := [Vector2.UP, Vector2.DOWN, Vector2.LEFT, Vector2.RIGHT]
+	for i in 4:
+		var shadow := _ticks[i]
+		var dir: Vector2 = dirs[i]
+		var size := Vector2(2.0, length) if dir.x == 0.0 else Vector2(length, 2.0)
+		shadow.size = size + Vector2(2.0, 2.0)
+		(shadow.get_child(0) as ColorRect).size = size
+		var centre := dir * (gap + length * 0.5)
+		shadow.position = centre - shadow.size * 0.5
+		shadow.visible = spread > 0.01 or aiming
 
 
 func _on_health_changed(ratio: float) -> void:
@@ -425,12 +582,6 @@ func _rebuild_gear() -> void:
 		child.queue_free()
 	var passive := []
 	if _player != null:
-		if _player.weapon_id != "":
-			var weapon := Gear.info(_player.weapon_id)
-			var line: String = weapon.name
-			if weapon.has("ammo"):
-				line += "　×%d" % _player.weapon_ammo
-			_gear.add_child(_key_row("左鍵", line, UiKit.TEXT))
 		for id in _player.boosts:
 			var boost := Gear.info(id)
 			if boost.get("consumable", false):
@@ -438,7 +589,7 @@ func _rebuild_gear() -> void:
 			else:
 				passive.append(boost.name)
 	if _usable != "":
-		_gear.add_child(_key_row("R", _usable, UiKit.ACCENT))
+		_gear.add_child(_key_row("X", _usable, UiKit.ACCENT))
 	if not passive.is_empty():
 		var label := _text("・".join(passive), 13, UiKit.DIM)
 		label.size_flags_horizontal = Control.SIZE_SHRINK_END

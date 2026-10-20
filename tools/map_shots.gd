@@ -12,13 +12,13 @@ const SHOTS := {
 		{"name": "mall_shop", "pos": Vector3(-10.0, 0.1, -1.0), "yaw": PI / 2.0, "pitch": -0.05},
 		{"name": "mall_dock", "pos": Vector3(0.0, 0.1, -20.0), "yaw": -PI / 2.0, "pitch": 0.0},
 	],
-	"station": [
-		{"name": "station_hut", "pos": Vector3(-14.0, 0.1, 1.0), "yaw": PI / 2.0 + 0.3, "pitch": 0.0},
-		{"name": "station_snow", "pos": Vector3(-6.0, 0.1, 2.0), "yaw": -PI / 2.0, "pitch": 0.05},
-		{"name": "station_yard", "pos": Vector3(-2.0, 0.1, 4.0), "yaw": PI, "pitch": 0.05},
-		{"name": "station_generator", "pos": Vector3(13.0, 0.1, -19.0), "yaw": -PI / 2.0, "pitch": -0.1},
-		{"name": "station_garage", "pos": Vector3(10.0, 0.1, 18.0), "yaw": -PI / 2.0, "pitch": 0.0},
-		{"name": "station_lab", "pos": Vector3(-11.0, 0.1, 20.0), "yaw": PI / 2.0, "pitch": -0.05},
+	"subway": [
+		{"name": "subway_concourse", "pos": Vector3(-29.0, 5.1, -1.0), "yaw": -PI / 2.0 - 0.2, "pitch": 0.0},
+		{"name": "subway_platform", "pos": Vector3(-2.0, 0.1, -4.5), "yaw": -PI / 2.0 + 0.15, "pitch": 0.05},
+		{"name": "subway_tracks", "pos": Vector3(14.0, 0.1, -12.2), "yaw": PI / 2.0 - 0.25, "pitch": -0.05},
+		{"name": "subway_escalator", "pos": Vector3(3.0, 0.1, 0.5), "yaw": PI / 2.0, "pitch": 0.25},
+		{"name": "subway_signal_box", "pos": Vector3(35.0, 0.1, -3.5), "yaw": -PI / 2.0 - 0.4, "pitch": -0.05},
+		{"name": "subway_lift", "pos": Vector3(-26.0, 0.1, 2.5), "yaw": PI / 2.0, "pitch": 0.0},
 	],
 	"afternoon": [
 		{"name": "afternoon_corridor", "pos": Vector3(2.0, 0.1, 0.0), "yaw": -PI / 2.0, "pitch": 0.0},
@@ -93,6 +93,25 @@ func _run() -> void:
 			for i in 5:
 				await process_frame
 			continue
+		# The subway's last train, seen from the platform as it comes through.
+		if main.level.has_method("host_call_train"):
+			main.level.warn_time = 4.0
+			main.player.global_position = Vector3(6.0, 0.1, 4.6)
+			main.player.rotation.y = PI / 2.0 + 0.5
+			main.player.get_node("Head").rotation.x = -0.05
+			main.level.host_call_train(1, 1)
+			for i in 150:
+				await process_frame
+			_save(out_dir, id + "_warning")
+			while main.level.train_state != "passing":
+				await process_frame
+			# Frames are slow under xvfb: pin the train where it shows best.
+			for at: float in [-2.0, 30.0]:
+				main.level._sweep_t = (SubwayStation.END_X + at) / SubwayStation.TRAIN_SPEED
+				main.level._place_train()
+				await process_frame
+				await process_frame
+				_save(out_dir, id + ("_train" if at < 0.0 else "_train2"))
 		# After the objective: neon / headlights on.
 		main.run._lever_pulled()
 		var last: Dictionary = SHOTS[id][0]

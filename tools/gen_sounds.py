@@ -336,6 +336,28 @@ def roar():
     return out
 
 
+def horn():
+    """The last train's horn: two detuned low reeds, long and sour, echoing down a tunnel."""
+    n = int(RATE * 2.6)
+    out = []
+    echo = [0.0] * n
+    for i in range(n):
+        t = i / RATE
+        f1 = 146 + 2 * math.sin(2 * math.pi * 3 * t)
+        f2 = 174 + 2 * math.sin(2 * math.pi * 2.6 * t)
+        s = 0.0
+        for f, a in ((f1, 0.5), (f2, 0.42)):
+            ph = (f * t) % 1.0
+            s += a * (2 * ph - 1)  # buzzy saw reed
+        s += rng.uniform(-0.05, 0.05)
+        out.append(s * env(i, n, 0.06, 0.45))
+    out = lowpass(out, 0.25)
+    d = int(RATE * 0.23)
+    for i in range(n):
+        echo[i] = out[i] + (echo[i - d] * 0.45 if i >= d else 0.0)
+    return [e * 0.9 for e in echo]
+
+
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
     for name, fn in [("thump", thump), ("hiss", hiss), ("whistle", whistle), ("step", step),
@@ -345,6 +367,6 @@ if __name__ == "__main__":
                      ("chime", chime), ("wind", wind),
                      ("lullaby", lullaby), ("cough", cough), ("rumble", rumble), ("giggle", giggle),
                      ("static", static), ("tune", tune), ("boom", boom), ("zap", zap),
-                     ("bang", bang), ("quack", quack), ("roar", roar)]:
+                     ("bang", bang), ("quack", quack), ("roar", roar), ("horn", horn)]:
         write(name, fn())
     print("sounds written to", os.path.abspath(OUT))

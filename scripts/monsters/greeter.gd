@@ -105,6 +105,19 @@ func host_action(action: String, player: Player) -> void:
 			_snap(player)
 
 
+## Host: a weapon hit it. Shooting in the shop is worse than running: the smile drops
+## and it is behind the shooter. With its real face showing it is easier to hurt.
+func on_hit(hit: Dictionary) -> float:
+	if angry:
+		return 1.5
+	var attacker: Player = hit.get("attacker") as Player
+	if attacker != null and attacker.is_active() and _cooldown <= 0.0:
+		MonsterKit.tell(attacker, &"remote_warn", ["「店內禁止開槍。」", 0.3])
+		_snap(attacker)
+		return 0.6
+	return 1.0
+
+
 func _think(delta: float) -> void:
 	_cooldown = maxf(_cooldown - delta, 0.0)
 	for player in _ignore.keys():

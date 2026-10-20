@@ -26,6 +26,13 @@ enum State { WANDER, RUSH, FETCH, HOME, SCATTER }
 
 ## Replicated so clients animate the rats and hear them.
 var state := State.WANDER
+## Replicated: how many rats are still running (shot ones stop).
+var rats_left := RAT_COUNT:
+	set(value):
+		rats_left = value
+		if is_node_ready():
+			for i in _rats.size():
+				_rats[i].visible = i < value
 var home := Vector3.ZERO
 var rng := RandomNumberGenerator.new()
 var carried: Array[Dictionary] = []
@@ -60,7 +67,7 @@ func _ready() -> void:
 	if home == Vector3.ZERO:
 		home = global_position
 	_build_model()
-	MonsterKit.add_sync(self, [".:position", ".:rotation", ".:state"])
+	MonsterKit.add_sync(self, [".:position", ".:rotation", ".:state", ".:rats_left"])
 
 
 func _physics_process(delta: float) -> void:
@@ -81,6 +88,26 @@ func hear(position: Vector3, _radius: float, kind: int) -> void:
 		scatter()
 
 
+## Host: a weapon hit the pack. A few rats stop ticking; the rest scatter and regroup.
+## Blasts and electricity (through all that tin) are what really work.
+func on_hit(_hit: Dictionary) -> float:
+	scatter()
+	return 1.0
+
+
+## Host: the last of them is down. Whatever they carried is left where they fell.
+func host_kill() -> void:
+	if is_queued_for_deletion():
+		return
+	var run := Run.instance
+	if run != null:
+		for data in carried:
+			run.host_spawn_loot(data, global_position + Vector3.UP * 0.3, rng.randf_range(0, TAU))
+	carried.clear()
+	_play.rpc("clank", 0.8)
+	queue_free()
+
+
 func scatter() -> void:
 	if state == State.SCATTER:
 		return
@@ -93,6 +120,10 @@ func scatter() -> void:
 
 func _think(delta: float) -> void:
 	_timer -= delta
+	if has_meta("hp"):
+		var left := clampi(ceili(RAT_COUNT * float(get_meta("hp")) / maxf(float(get_meta("max_hp", 1.0)), 1.0)), 1, RAT_COUNT)
+		if left != rats_left:
+			rats_left = left
 	match state:
 		State.SCATTER:
 			_move(RUSH_SPEED)

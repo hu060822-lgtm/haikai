@@ -1,5 +1,5 @@
 extends SceneTree
-## Renders every menu and the in-game HUD (factory + research station) to PNGs.
+## Renders every menu and the in-game HUD (factory + subway) to PNGs.
 ## Run (needs a display):
 ##   xvfb-run -a -s "-screen 0 1280x720x24" godot --path . --rendering-driver opengl3 \
 ##     --resolution 1280x720 --script res://tools/ui_shots.gd -- <out_dir> [prefix]
@@ -46,13 +46,13 @@ func _run() -> void:
 	main.queue_free()
 	await _frames(5)
 
-	for map in ["factory", "station"]:
+	for map in ["factory", "subway"]:
 		main = load("res://scenes/main.tscn").instantiate()
 		main.show_menus = false
 		root.add_child(main)
 		Run.forced_monsters = ["colossus"]
 		Run.forced_map = map
-		main.start_run({"weapon": "nail_gun", "boosts": ["adrenaline", "night_goggles"]})
+		main.start_run({"build": {"frame": "nail_gun", "parts": {"sight": "red_dot"}}, "boosts": ["adrenaline", "night_goggles"]})
 		await _frames(40)
 		main.colossus.process_mode = Node.PROCESS_MODE_DISABLED
 		main.colossus.global_position = Vector3(0, -50, -100)
@@ -68,9 +68,9 @@ func _run() -> void:
 		player.health_changed.emit(0.78)
 		player.prompt_changed.emit(LootTable.prompt(LootTable.ITEMS[12]) if map == "factory" else "[E] 打開白色的門")
 		main.hud.set_voice("speaking")
-		if map == "station":
+		if map == "subway":
 			main.run.time_left = 95.0
-			main.hud.show_message("外面風雪好大，體溫一直在掉…", 5.0)
+			main.hud.show_message("隧道深處傳來汽笛聲…末班車要進站了！", 5.0)
 			main.hud.set_extract_progress(0.45)
 		await _frames(30)
 		_save(out_dir, prefix + "hud_" + map)
@@ -83,7 +83,7 @@ func _run() -> void:
 		result.cause = "被鍋爐巨像抓住了"
 		result.items = [LootTable.ITEMS[0], LootTable.ITEMS[4], LootTable.ITEMS[4], LootTable.ITEMS[29]]
 		result.payout = LootTable.payout(result.items)
-		result.lost_gear = ["crowbar", "adrenaline"]
+		result.lost_gear = ["smg", "suppressor", "adrenaline"]
 		result.summary = {"extracted": 420, "threshold": 250, "guardian_won": false, "guardian": ""}
 		root.add_child(result)
 		await _frames(20)

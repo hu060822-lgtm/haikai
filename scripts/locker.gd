@@ -1,7 +1,7 @@
 class_name Locker
 extends StaticBody3D
-## A locked metal cabinet with better loot inside. Needs a crowbar, and prying it
-## open is loud.
+## A locked metal cabinet with better loot inside. Every scavenger can pry it open with
+## their knife (E, or V while looking at it), and prying it open is loud.
 
 ## The run decides whether it opens (the host owns it), then calls play_open().
 signal interact_requested()
@@ -83,21 +83,15 @@ static func _uv(mesh: Mesh) -> Mesh:
 	return LootShapes.with_uvs(mesh, 1.0)
 
 
-func get_prompt(player: Player = null) -> String:
+func get_prompt(_player: Player = null) -> String:
 	if is_open:
 		return ""
-	if player != null and player.has_gear("crowbar"):
-		return "[E / 左鍵] 撬開上鎖的櫃子（很吵）"
-	return "上鎖的櫃子：需要撬棍"
+	return "[E] 用小刀撬開上鎖的櫃子　很吵"
 
 
 func interact(player: Player) -> void:
-	if is_open:
-		return
-	if player.has_gear("crowbar"):
+	if not is_open:
 		pry(player)
-	else:
-		player.message.emit("鎖住了，需要撬棍")
 
 
 func pry(_player: Player) -> void:

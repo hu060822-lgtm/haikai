@@ -207,7 +207,10 @@ func _pvp_host() -> void:
 	await _frames(30)
 	for shot in 2:
 		var head := rival.global_position + Vector3.UP * 1.6
-		_main.run.request_weapon("shotgun", head, Vector3.DOWN)
+		var pellets := []
+		for i in int(Arsenal.FRAMES.shotgun.pellets):
+			pellets.append(Vector3.DOWN)
+		_main.run.request_shot({"frame": "shotgun", "parts": {}}, head, pellets)
 		await _frames(20)
 	_check(await _wait(func() -> bool: return rival.is_dead), "two shotgun hits kill the rival")
 	_main.player.die("test")

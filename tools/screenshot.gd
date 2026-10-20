@@ -44,7 +44,7 @@ func _run() -> void:
 	main.show_menus = false
 	Run.forced_monsters = ["colossus", "mannequin", "moth", "mimic"]
 	Run.forced_map = "factory"
-	main.start_run({"weapon": "crowbar", "boosts": ["adrenaline"]})
+	main.start_run({"build": Arsenal.STARTER, "boosts": ["adrenaline"]})
 	for i in 30:
 		await process_frame
 	main.colossus.process_mode = Node.PROCESS_MODE_DISABLED

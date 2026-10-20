@@ -18,6 +18,8 @@ const HIT_DAMAGE := 40.0
 const RETREAT_TIME := 10.0
 const REVEAL_TIME := 10.0
 const COLD_RANGE := 6.0
+## Hit effects that make it show up (and so let it be hurt).
+const REVEALING := ["reveal", "burn", "explode", "bubble", "melee", "bayonet"]
 
 ## Replicated: whether it is showing (powdered or struck).
 var revealed := false:
@@ -41,6 +43,7 @@ var _flicker_on := 0.0
 var _cough := 4.0
 var _wander := 0.0
 var _spotted := false
+var _shrug := 0.0
 
 
 func _ready() -> void:
@@ -96,6 +99,23 @@ func set_spotted(on: bool) -> void:
 	_model.visible = on or revealed
 
 
+## Host: a weapon hit it. A bullet through the haze hits nothing: only once it shows
+## (powder, rock salt, fire, a blast, a blade) can it be hurt.
+func on_hit(hit: Dictionary) -> float:
+	var effects: Dictionary = hit.get("effects", {})
+	for effect in REVEALING:
+		if effects.has(effect):
+			reveal()
+			break
+	if revealed:
+		return 1.0
+	var attacker: Player = hit.get("attacker") as Player
+	if attacker != null and _shrug <= 0.0:
+		_shrug = 6.0
+		MonsterKit.tell(attacker, &"remote_warn", ["子彈穿過了霧，什麼都沒打到。（粗鹽彈、火、刀子能逼它現形）", 0.0])
+	return 0.0
+
+
 func reveal() -> void:
 	_reveal = REVEAL_TIME
 	revealed = true
@@ -116,6 +136,7 @@ func _physics_process(delta: float) -> void:
 func _think(delta: float) -> void:
 	_reveal = maxf(_reveal - delta, 0.0)
 	_retreat = maxf(_retreat - delta, 0.0)
+	_shrug = maxf(_shrug - delta, 0.0)
 	revealed = _reveal > 0.0
 	var speed := REVEALED_SPEED if revealed else SPEED
 	var target: Player = null
@@ -162,7 +183,7 @@ func _think(delta: float) -> void:
 func _find_target() -> Player:
 	var best: Player = null
 	var best_distance := NOTICE_RANGE
-	var station := Run.instance.level as ResearchStation if Run.instance != null else null
+	var station: Node = Run.instance.level if Run.instance != null else null
 	for player in MonsterKit.active_players(get_tree()):
 		var distance := player.global_position.distance_to(global_position)
 		if distance >= best_distance or is_cold(player, station) or player.has_effect("diving"):
@@ -173,8 +194,9 @@ func _find_target() -> Player:
 
 
 ## Out in the snow, or carrying something icy: it keeps away.
-func is_cold(player: Player, station: ResearchStation = null) -> bool:
-	if station != null and station.is_outdoors(player.global_position):
+## Any map may have an outdoors (is_outdoors); out there is cold.
+func is_cold(player: Player, station: Node = null) -> bool:
+	if station != null and station.has_method("is_outdoors") and station.is_outdoors(player.global_position):
 		return true
 	if player.carries_tag("cold"):
 		return player.global_position.distance_to(global_position) < COLD_RANGE * 3.0
