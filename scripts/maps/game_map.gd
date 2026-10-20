@@ -39,6 +39,8 @@ var wings: Array[RoomGrid] = []
 ## Floor footprints (x/z) of the solid boxes built so far that a monster can't walk
 ## under or step over; random wings keep their patrol points clear of them.
 var blockers: Array[Rect2] = []
+## Traps placed in this map (see Traps).
+var traps: Array[Node3D] = []
 ## A map lit so brightly that lanterns and night vision don't matter (the dreamcore one).
 var bright := false
 ## This run's item pool (LootTable.make_pool), set by the host before loot is rolled.
@@ -385,6 +387,25 @@ func _plan_wing(grid: RoomGrid) -> RoomGrid:
 	if not compact:
 		wings.append(grid)
 	return grid
+
+
+## The usual random sprawl around a core: rooms grow out from `ports` (each [world
+## point on the core wall's outer face, outward direction]) up to `reach` metres past
+## the core on every side.
+func _plan_sprawl(style: String, core: Rect2, port_specs: Array, theme: Dictionary, kits: Array,
+		reach := 76.0, target := 60) -> RoomGrid:
+	var grid := RoomGrid.new()
+	grid.name = style
+	grid.style = style
+	grid.origin = Vector3(core.position.x, 0, core.position.y)
+	grid.blocked.assign([core])
+	grid.limit = core.grow(reach)
+	grid.target_rooms = target
+	for spec in port_specs:
+		grid.ports.append({"pos": spec[0], "dir": spec[1]})
+	grid.theme = theme
+	grid.kits = kits
+	return _plan_wing(grid)
 
 
 func _build_wings() -> void:

@@ -75,30 +75,26 @@ func _build_environment() -> void:
 func _plan_wings() -> void:
 	var theme := {"clutter": "industrial", "floor": "concrete", "floor_tint": Color(0.8, 0.78, 0.75), "wall": "brick", "wall_tint": Color(0.85, 0.8, 0.75),
 		"inner_wall": "rust_metal", "roof": "rust_metal", "roof_tint": Color(0.6, 0.55, 0.5),
-		"light": Color(1.0, 0.8, 0.5), "light_energy": 0.55}
+		"light": Color(1.0, 0.8, 0.5), "light_energy": 0.85}
 	var kits := [
 		RoomKits.kit("storage", 3.0), RoomKits.kit("pump_room", 2.0), RoomKits.kit("workshop", 2.0),
 		RoomKits.kit("locker_room", 1.0, {"max_count": 2}), RoomKits.kit("coal_bunker", 1.5, {"floor_tint": Color(0.45, 0.42, 0.4)}),
 		RoomKits.kit("office", 1.5, {"floor": "carpet", "floor_tint": Color(0.45, 0.4, 0.35), "lit": true}),
 		RoomKits.kit("boiler_annex", 1.0, {"min_cells": 2, "max_count": 1}),
-		RoomKits.kit("vault", 1.0, {"deep": true, "min_depth": 2}), RoomKits.kit("bare", 1.0),
+		RoomKits.kit("vault", 1.0, {"deep": true, "min_depth": 2}), RoomKits.kit("bare", 0.5),
+		FacilityKits.kit("furnace_hall", 2.0, {"shape": "hall", "max_count": 2, "floor_tint": Color(0.5, 0.45, 0.42)}),
+		FacilityKits.kit("conveyor_hall", 2.0, {"shape": "hall"}), FacilityKits.kit("tank_farm", 1.5, {"shape": "hall"}),
+		FacilityKits.kit("conveyor_hall", 1.0, {"min_cells": 2}), FacilityKits.kit("chain_room", 1.0, {"max_count": 3}),
+		FacilityKits.kit("pipe_corridor", 1.0, {"shape": "corridor"}),
 	]
-	for spec in [
-		["west", Vector3(-53, 0, -18), 3, 3, Vector2i(1, 0), [Vector2i(2, 0), Vector2i(2, 1)]],
-		["east", Vector3(17, 0, -18), 3, 3, Vector2i(-1, 0), [Vector2i(0, 0), Vector2i(0, 1)]],
-		["north", Vector3(-12, 0, -59), 2, 3, Vector2i(0, 1), [Vector2i(0, 2)]],
-		["south", Vector3(-12, 0, 23), 2, 3, Vector2i(0, -1), [Vector2i(0, 0), Vector2i(1, 0)]],
-	]:
-		var grid := RoomGrid.new()
-		grid.name = spec[0]
-		grid.origin = spec[1]
-		grid.cols = spec[2]
-		grid.rows = spec[3]
-		grid.core_side = spec[4]
-		grid.ports.assign(spec[5])
-		grid.theme = theme
-		grid.kits = kits
-		_plan_wing(grid)
+	var west := Vector2i(-1, 0)
+	var east := Vector2i(1, 0)
+	var grid := _plan_sprawl("factory", Rect2(-17, -23, 34, 46), [
+		[Vector3(-17, 0, -12), west], [Vector3(-17, 0, 0), west], [Vector3(17, 0, -12), east], [Vector3(17, 0, 0), east],
+		[Vector3(-6, 0, -23), Vector2i(0, -1)], [Vector3(-6, 0, 23), Vector2i(0, 1)], [Vector3(6, 0, 23), Vector2i(0, 1)],
+	], theme, kits)
+	# A factory is mostly long service corridors between big machine halls.
+	grid.shape_weights = {"corridor": 4.0, "room": 3.0, "hall": 1.8}
 
 
 func _build_shell() -> void:

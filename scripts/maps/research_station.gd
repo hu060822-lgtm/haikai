@@ -200,30 +200,35 @@ func _heater(pos: Vector3) -> void:
 ## Open snowfields through gaps in the cliffs on every side, dotted with huts, camps,
 ## wrecks and rocks. Out there it is always cold; only some of the huts have a stove.
 func _plan_wings() -> void:
-	var theme := {"floor": "snow", "floor_tint": Color.WHITE, "wall": "snow", "wall_tint": Color(0.7, 0.78, 0.85),
+	var theme := {"floor": "snow", "floor_tint": Color.WHITE, "wall": "snow", "wall_tint": Color(0.62, 0.7, 0.8),
+		"roof": "snow", "roof_tint": Color(0.42, 0.48, 0.58), "light": Color(0.6, 0.8, 1.0), "light_energy": 0.5,
 		"wall_thickness": 1.0, "density": 2.0}
 	var kits := [
 		{"name": "hut", "weight": 2.0, "build": _kit_hut}, {"name": "rocks", "weight": 1.5, "build": _kit_rocks},
 		{"name": "pines", "weight": 2.0, "build": _kit_pines}, {"name": "wreck", "weight": 1.0, "build": _kit_wreck},
 		{"name": "camp", "weight": 1.0, "build": _kit_camp}, {"name": "mast", "weight": 0.7, "build": _kit_mast, "max_count": 2},
-		{"name": "cache", "weight": 1.0, "build": _kit_cache, "deep": true, "min_depth": 2},
+		{"name": "cache", "weight": 1.0, "build": _kit_cache, "deep": true, "min_depth": 2, "roofless": false},
+		FacilityKits.kit("ice_cavern", 3.0, {"roofless": false, "floor_tint": Color(0.75, 0.85, 1.0)}),
+		FacilityKits.kit("frozen_lake", 1.5, {"shape": "hall", "max_count": 2, "roofless": true, "floor_tint": Color(0.7, 0.85, 1.0)}),
+		FacilityKits.kit("crash_site", 1.0, {"shape": "hall", "max_count": 1, "roofless": true}),
+		FacilityKits.kit("buried_lab", 1.2, {"max_count": 3, "roofless": false, "floor": "tile", "floor_tint": Color(0.7, 0.75, 0.78)}),
+		FacilityKits.kit("ice_tunnel", 1.0, {"shape": "corridor", "roofless": false}),
 	]
-	for spec in [["west", Vector3(-79, 0, -24), Vector2i(1, 0), Vector2i(2, 1)], ["east", Vector3(31, 0, -24), Vector2i(-1, 0), Vector2i(0, 1)],
-			["north", Vector3(-24, 0, -79), Vector2i(0, 1), Vector2i(1, 2)], ["south", Vector3(-24, 0, 31), Vector2i(0, -1), Vector2i(1, 0)]]:
-		var grid := RoomGrid.new()
-		grid.name = spec[0]
-		grid.origin = spec[1]
-		grid.cell = 16.0
-		grid.cols = 3
-		grid.rows = 3
-		grid.height = 8.0
-		grid.core_side = spec[2]
-		grid.ports.assign([spec[3]])
-		grid.open_plan = true
-		grid.roofed = false
-		grid.theme = theme
-		grid.kits = kits
-		_plan_wing(grid)
+	for entry in kits:
+		if entry.name in ["hut", "rocks", "pines", "wreck", "camp", "mast"]:
+			entry.roofless = true
+		if entry.name == "hut":
+			entry.shape = "hall"
+	var grid := _plan_sprawl("station", Rect2(-31, -31, 62, 62), [
+		[Vector3(-31, 0, 0), Vector2i(-1, 0)], [Vector3(31, 0, 0), Vector2i(1, 0)],
+		[Vector3(0, 0, -31), Vector2i(0, -1)], [Vector3(0, 0, 31), Vector2i(0, 1)],
+	], theme, kits)
+	grid.dark_chance = 0.0
+	# Snow canyons between tall cliffs, opening into ice caves.
+	grid.height = 8.0
+	grid.hall_height = Vector2(9.0, 11.0)
+	grid.theme.roofless_chance = 0.4
+	grid.shape_weights = {"corridor": 2.5, "room": 4.0, "hall": 2.0}
 
 
 func _kit_hut(grid: RoomGrid, room: Dictionary) -> void:

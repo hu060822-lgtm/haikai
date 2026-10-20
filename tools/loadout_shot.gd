@@ -16,6 +16,7 @@ func _run() -> void:
 	GameState.money = 2400
 	var main = load("res://scenes/main.tscn").instantiate()
 	root.add_child(main)
+	main.show_loadout()  # the game opens on the title screen
 	for i in 20:
 		await process_frame
 	root.get_texture().get_image().save_png(out_dir.path_join("loadout.png"))

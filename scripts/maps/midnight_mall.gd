@@ -139,7 +139,7 @@ func _on_objective() -> void:
 func _plan_wings() -> void:
 	var back := {"clutter": "backroom", "floor": "tile", "floor_tint": Color(0.62, 0.62, 0.6), "wall": "concrete", "wall_tint": Color(0.72, 0.7, 0.66),
 		"inner_wall": "panel", "roof": "panel", "roof_tint": Color(0.45, 0.45, 0.48), "light": Color(0.85, 0.92, 1.0),
-		"light_energy": 0.5, "density": 1.0}
+		"light_energy": 0.75, "density": 1.0}
 	var kits := [
 		RoomKits.kit("stockroom", 3.0), RoomKits.kit("back_office", 2.0, {"floor": "carpet", "floor_tint": Color(0.35, 0.35, 0.45)}),
 		RoomKits.kit("restroom", 1.0, {"max_count": 2, "floor_tint": Color(0.8, 0.85, 0.85)}),
@@ -148,32 +148,20 @@ func _plan_wings() -> void:
 		RoomKits.kit("cinema", 1.0, {"min_cells": 2, "max_count": 1, "tidy": true, "floor": "carpet", "floor_tint": Color(0.35, 0.1, 0.12)}),
 		RoomKits.kit("storage", 1.0), RoomKits.kit("vault", 1.0, {"deep": true, "min_depth": 2}),
 	]
-	for spec in [["west", Vector3(-55, 0, -27), Vector2i(1, 0), Vector2i(2, 0)], ["east", Vector3(19, 0, -27), Vector2i(-1, 0), Vector2i(0, 0)]]:
-		var grid := RoomGrid.new()
-		grid.name = spec[0]
-		grid.origin = spec[1]
-		grid.cols = 3
-		grid.rows = 4
-		grid.core_side = spec[2]
-		grid.core_spans.assign([Vector2(-25, 25)])
-		grid.ports.assign([spec[3]])
-		grid.theme = back
-		grid.kits = kits
-		_plan_wing(grid)
-	var park := RoomGrid.new()
-	park.name = "car park"
-	park.origin = Vector3(-24, 0, 25)
-	park.cols = 4
-	park.rows = 3
-	park.core_side = Vector2i(0, -1)
-	park.core_spans.assign([Vector2(-19, 19)])
-	park.ports.assign([Vector2i(1, 0), Vector2i(2, 0)])
-	park.open_plan = true
-	park.dark_chance = 0.45
-	park.theme = {"floor": "concrete", "floor_tint": Color(0.5, 0.5, 0.52), "wall": "concrete", "wall_tint": Color(0.55, 0.55, 0.58),
-		"roof": "concrete", "roof_tint": Color(0.4, 0.4, 0.42), "light": Color(1.0, 0.7, 0.35), "light_energy": 0.55, "pillars": true}
-	park.kits = [RoomKits.kit("parking", 1.0)]
-	_plan_wing(park)
+	kits.append_array([
+		FacilityKits.kit("department_store", 2.0, {"shape": "hall", "floor": "tile", "floor_tint": Color(0.8, 0.8, 0.78)}),
+		FacilityKits.kit("food_court", 1.5, {"shape": "hall", "max_count": 2, "floor_tint": Color(0.85, 0.75, 0.6)}),
+		FacilityKits.kit("clothing_store", 2.0, {"floor": "carpet", "floor_tint": Color(0.5, 0.35, 0.4)}),
+		FacilityKits.kit("toy_store", 1.5, {"max_count": 3, "floor_tint": Color(0.6, 0.8, 0.85)}),
+		FacilityKits.kit("service_corridor", 1.0, {"shape": "corridor"}),
+	])
+	kits.append(RoomKits.kit("parking", 1.5, {"shape": "hall", "max_count": 2, "floor": "concrete", "floor_tint": Color(0.5, 0.5, 0.52)}))
+	var grid := _plan_sprawl("mall", Rect2(-19, -25, 38, 50), [
+		[Vector3(-19, 0, -21), Vector2i(-1, 0)], [Vector3(19, 0, -21), Vector2i(1, 0)],
+		[Vector3(-6, 0, 25), Vector2i(0, 1)], [Vector3(6, 0, 25), Vector2i(0, 1)],
+	], back, kits)
+	# The mall keeps growing stores: big halls off short service corridors.
+	grid.shape_weights = {"corridor": 2.5, "room": 4.0, "hall": 2.2}
 
 
 func _build_shell() -> void:

@@ -39,6 +39,7 @@ func _run() -> void:
 	await _test_gear()
 	await _test_squads()
 	Run.forced_monsters = ["colossus"]
+	await _test_traps()
 	await _test_maps()
 	await _test_wings()
 	print("SMOKE TEST %s (%d failures)" % ["PASSED" if _failures == 0 else "FAILED", _failures])
@@ -101,9 +102,9 @@ func _test_content() -> void:
 		for kind in kinds:
 			if MonsterRoster.MONSTERS[kind].size == "large":
 				large += 1
-		if kinds.size() < 2 or kinds.size() > 4 or large > 1:
+		if kinds.size() < MonsterRoster.MIN_KINDS or kinds.size() > MonsterRoster.MAX_KINDS or large > 1:
 			ok = false
-	_check(ok, "monster draws have 2 to 4 kinds and at most one large")
+	_check(ok, "monster draws have 3 to 5 kinds and at most one large")
 
 
 func _monster(main: Node, script: Script) -> Node:
@@ -682,6 +683,7 @@ func _test_director() -> void:
 ## Another squad's scavenger, standing in front of you: weapons hurt them, never teammates.
 func _test_squads() -> void:
 	print("squads")
+	Run.forced_monsters = ["colossus"]
 	var main = await _new_run({"weapon": "shotgun"})
 	var player: Player = main.player
 	main.colossus.process_mode = Node.PROCESS_MODE_DISABLED
@@ -719,6 +721,243 @@ func _test_squads() -> void:
 	await _frames(2)
 	_check(rival.is_dead, "a crowbar finishes them off")
 	await _end_run(main)
+
+
+## Traps (scripts/traps/): each kind builds cheaply and the same from the same seed,
+## and the main ones go off on a player with the right effect.
+class _TrapEar extends Node:
+	var heard: Array = []
+
+	func hear(pos: Vector3, radius: float, kind: int) -> void:
+		heard.append([pos, radius, kind])
+
+	func loudest(kind := -1) -> float:
+		var best := 0.0
+		for h in heard:
+			if kind < 0 or h[2] == kind:
+				best = maxf(best, h[1])
+		return best
+
+
+func _test_traps() -> void:
+	print("traps")
+	Run.forced_map = "factory"
+	var main = await _new_run()
+	var level: GameMap = main.level
+	var player: Player = main.player
+	main.colossus.process_mode = Node.PROCESS_MODE_DISABLED
+	for style in Traps.STYLES:
+		var kinds := Traps.kinds_for(style)
+		_check(not kinds.is_empty() and kinds.all(func(k: String) -> bool: return Traps.KINDS.has(k)), "traps: %s has trap kinds %s" % [style, kinds])
+	var heavy := []
+	var same := true
+	for kind in Traps.KINDS:
+		var a := Traps.create(kind, level, Vector3(40, -30, 40), 30.0, 99)
+		var b := Traps.create(kind, level, Vector3(40, -30, 40), 30.0, 99)
+		var tris := [0, 0]
+		for i in 2:
+			for node in [a, b][i].find_children("*", "MeshInstance3D", true, false):
+				for s in node.mesh.get_surface_count():
+					tris[i] += node.mesh.surface_get_arrays(s)[Mesh.ARRAY_VERTEX].size() / 3
+		if tris[0] >= 300:
+			heavy.append([kind, tris[0]])
+		if tris[0] != tris[1] or a.name == b.name:
+			same = false
+		a.queue_free()
+		b.queue_free()
+	_check(heavy.is_empty(), "traps: every kind stays under 300 triangles %s" % [heavy])
+	_check(same, "traps: same seed builds the same trap, each under its own name")
+	await _frames(2)
+	var ear := _TrapEar.new()
+	ear.add_to_group("listeners")
+	root.add_child(ear)
+	player.global_position = Vector3(0, 0.1, 2)
+	player.velocity = Vector3.ZERO
+	await _frames(20)
+	var floor_at := Vector3(0, player.global_position.y, 2)
+	var reset := func(at: Vector3) -> void:
+		player.global_position = at + Vector3.UP * 0.05
+		player.velocity = Vector3.ZERO
+		player.health = Player.MAX_HEALTH
+		player.snared = 0.0
+		player.trap_slow = 0.0
+		ear.heard.clear()
+
+	# Bear trap: snaps shut, bites, holds you, clangs; mashing E frees you sooner.
+	reset.call(floor_at + Vector3(0, 0, 3))
+	await _frames(3)
+	var bear: BearTrap = Traps.create("bear_trap", level, floor_at, 0.0, 1)
+	reset.call(floor_at)
+	await _frames(4)
+	_check(bear.state == BearTrap.SPRUNG, "bear trap: stepping on it springs it")
+	_check(player.health < Player.MAX_HEALTH and player.snared > 1.5, "bear trap: it bites and holds you (hp=%d, held %.1fs)" % [player.health, player.snared])
+	_check(ear.loudest() >= 20.0, "bear trap: the clang is loud (%.0f)" % ear.loudest())
+	var held_at := player.global_position
+	Input.action_press("move_forward")
+	await _frames(30)
+	Input.action_release("move_forward")
+	_check(player.global_position.distance_to(held_at) < 0.15, "bear trap: you can't walk away while held")
+	var before: float = player.snared
+	Input.action_press("interact")
+	await _frames(1)
+	Input.action_release("interact")
+	await _frames(1)
+	_check(player.snared < before - 0.4, "bear trap: mashing E works you free sooner (%.2f -> %.2f)" % [before, player.snared])
+	player.snared = 0.0
+	reset.call(floor_at + Vector3(0, 0, 3))
+	bear._rearm = 0.0
+	await _frames(3)
+	_check(bear.state == BearTrap.ARMED, "bear trap: the host re-arms it once nobody is on it")
+	Input.action_press("crouch")
+	await _frames(3)
+	bear.interact(player)
+	await _frames(2)
+	Input.action_release("crouch")
+	_check(bear.state == BearTrap.SAFE, "bear trap: crouch and E disarms it")
+	reset.call(floor_at)
+	await _frames(4)
+	_check(player.snared == 0.0 and player.health == Player.MAX_HEALTH, "bear trap: a disarmed trap is harmless")
+	bear.queue_free()
+
+	# Tripwire: walking through rattles the cans loud enough to draw monsters.
+	reset.call(floor_at + Vector3(0, 0, 3))
+	await _frames(3)
+	var wire: Tripwire = Traps.create("tripwire", level, floor_at, 0.0, 2, {"width": 1.4})
+	reset.call(floor_at + Vector3(0.3, 0, 0.1))
+	await _frames(4)
+	_check(wire.state == Tripwire.TRIPPED, "tripwire: walking into it trips it")
+	_check(ear.loudest(GameNoise.Kind.MACHINE) >= 40.0, "tripwire: the rattle carries far (%.0f)" % ear.loudest())
+	wire.queue_free()
+	reset.call(floor_at + Vector3(0, 0, 3))
+	await _frames(3)
+	var cut: Tripwire = Traps.create("tripwire", level, floor_at, 90.0, 3)
+	Input.action_press("crouch")
+	await _frames(3)
+	cut.interact(player)
+	await _frames(2)
+	Input.action_release("crouch")
+	reset.call(floor_at)
+	await _frames(4)
+	_check(cut.state == Tripwire.CUT and ear.loudest() < 40.0, "tripwire: crouch and E cuts it quietly")
+	cut.queue_free()
+
+	# Steam vent: hisses first, then the burst burns you and throws you back.
+	reset.call(floor_at + Vector3(0, 0, 3))
+	await _frames(3)
+	var vent: SteamVent = Traps.create("steam_vent", level, floor_at, 0.0, 4)
+	vent._clock = SteamVent.PERIOD - SteamVent.BURST_TIME - SteamVent.HISS_TIME + 0.05
+	await _frames(3)
+	_check(vent.state == SteamVent.HISS, "steam vent: it hisses before it bursts")
+	reset.call(floor_at + Vector3(0.3, 0, 0))
+	vent._clock = SteamVent.PERIOD - SteamVent.BURST_TIME + 0.02
+	await _frames(2)
+	_check(vent.state == SteamVent.BURST and player.health < Player.MAX_HEALTH, "steam vent: the burst scalds you (hp=%d)" % player.health)
+	await _frames(20)
+	_check(Vector2(player.global_position.x - floor_at.x, player.global_position.z - floor_at.z).length() > 0.6,
+		"steam vent: it throws you off the grate")
+	vent.queue_free()
+
+	# Electrified puddle: shocks you while the power is on, safe in a blackout.
+	reset.call(floor_at + Vector3(0, 0, 3))
+	await _frames(3)
+	var puddle: LivePuddle = Traps.create("live_puddle", level, floor_at, 0.0, 5)
+	level.power_on = false
+	reset.call(floor_at)
+	await _frames(10)
+	_check(player.health == Player.MAX_HEALTH, "live puddle: harmless with the power off")
+	level.power_on = true
+	await _frames(10)
+	_check(player.health < Player.MAX_HEALTH, "live puddle: shocks you with the power on (hp=%d)" % player.health)
+	puddle.queue_free()
+
+	# Shop alarm gate: only screams when you carry loot through it.
+	reset.call(floor_at + Vector3(0, 0, 3))
+	await _frames(3)
+	var gate: AlarmGate = Traps.create("alarm_gate", level, floor_at, 0.0, 6)
+	reset.call(floor_at + Vector3(0, 0, 1.0))
+	await _frames(3)
+	reset.call(floor_at)
+	await _frames(3)
+	_check(gate.state == AlarmGate.STANDBY, "alarm gate: empty-handed walks through quietly")
+	reset.call(floor_at + Vector3(0, 0, 1.0))
+	player.pickup(LootTable.make(1))
+	await _frames(3)
+	reset.call(floor_at)
+	await _frames(3)
+	_check(gate.state == AlarmGate.ALARM and ear.loudest(GameNoise.Kind.MACHINE) >= 40.0, "alarm gate: carrying loot through sets it screaming")
+	player.items.clear()
+	player._recalculate()
+	gate.queue_free()
+
+	# Pressure plate: click, a moment, then the sandbag drops on whoever stayed.
+	reset.call(floor_at + Vector3(0, 0, 3))
+	await _frames(3)
+	var plate: DebrisPlate = Traps.create("debris_plate", level, floor_at, 0.0, 7)
+	reset.call(floor_at)
+	await _frames(3)
+	_check(plate.state == DebrisPlate.CLICKED and player.health == Player.MAX_HEALTH, "debris plate: it clicks first")
+	await _frames(60)
+	_check(plate.state == DebrisPlate.FALLEN and player.health < Player.MAX_HEALTH, "debris plate: the bag lands on you if you stay (hp=%d)" % player.health)
+	plate.queue_free()
+
+	# Music box: wakes up when you come close, plays a lure for monsters, E shuts it.
+	reset.call(floor_at + Vector3(0, 0, 6))
+	await _frames(3)
+	var box: MusicBox = Traps.create("music_box", level, floor_at, 0.0, 8)
+	await _frames(3)
+	_check(box.state == MusicBox.WAITING, "music box: quiet until someone comes near")
+	reset.call(floor_at + Vector3(0, 0, 1.2))
+	await _frames(5)
+	_check(box.state == MusicBox.PLAYING and box._music.playing, "music box: it opens and plays as you approach")
+	_check(ear.loudest(GameNoise.Kind.MUSIC) >= 25.0, "music box: its tune is a lure monsters hear (%.0f)" % ear.loudest(GameNoise.Kind.MUSIC))
+	box.interact(player)
+	await _frames(3)
+	_check(box.state == MusicBox.SHUT and not box._music.playing, "music box: E snaps it shut")
+	box.queue_free()
+
+	# Soft floor: wading is slow and every step squeaks.
+	reset.call(floor_at + Vector3(0, 0, 3))
+	await _frames(3)
+	var mat: SqueakFloor = Traps.create("squeak_floor", level, floor_at, 0.0, 9)
+	reset.call(floor_at + Vector3(-0.6, 0, 0))
+	player.rotation.y = -PI / 2.0
+	Input.action_press("move_forward")
+	await _frames(40)
+	Input.action_release("move_forward")
+	_check(player.trap_slow > 0.0 and ear.loudest(GameNoise.Kind.FOOTSTEP) >= 10.0, "squeak floor: slows you and squeaks loudly")
+	mat.queue_free()
+	await _end_run(main)
+
+	# Thin ice on the station: cracks first, breaks on the next step, the water chills you.
+	Run.forced_map = "station"
+	main = await _new_run()
+	var station := main.level as ResearchStation
+	player = main.player
+	if main.colossus != null:
+		main.colossus.process_mode = Node.PROCESS_MODE_DISABLED
+	player.global_position = Vector3(0, 0.1, 6)
+	player.velocity = Vector3.ZERO
+	await _frames(20)
+	var ice_at := Vector3(0, player.global_position.y, 9)
+	var ice: ThinIce = Traps.create("thin_ice", station, ice_at, 0.0, 10)
+	player.global_position = ice_at + Vector3.UP * 0.05
+	await _frames(3)
+	_check(ice.state == ThinIce.CRACKED, "thin ice: the first step cracks it")
+	player.global_position = ice_at + Vector3(0, 0.05, 2.5)
+	await _frames(3)
+	station.body_heat = 60.0
+	player.global_position = ice_at + Vector3.UP * 0.05
+	await _frames(3)
+	_check(ice.state == ThinIce.BROKEN, "thin ice: the second step breaks through")
+	_check(player.trap_slow > 0.0 and station.body_heat < 50.0, "thin ice: freezing water slows you and steals body heat (%d)" % station.body_heat)
+	var icicles: Icicles = Traps.create("icicles", station, ice_at + Vector3(4, 0, 0), 0.0, 11)
+	player.health = Player.MAX_HEALTH
+	player.global_position = ice_at + Vector3(4, 0.05, 0)
+	await _frames(60)
+	_check(icicles.state == Icicles.FALLEN and player.health < Player.MAX_HEALTH, "icicles: they drop on you if you linger (hp=%d)" % player.health)
+	await _end_run(main)
+	ear.queue_free()
+	Run.forced_map = "factory"
 
 
 func _test_maps() -> void:

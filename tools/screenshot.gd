@@ -26,6 +26,7 @@ func _run() -> void:
 
 	var main = load("res://scenes/main.tscn").instantiate()
 	root.add_child(main)
+	main.show_loadout()  # the game opens on the title screen
 	for i in 10:
 		await process_frame
 	_save(out_dir, "loadout")
