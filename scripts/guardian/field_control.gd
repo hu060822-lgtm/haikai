@@ -18,9 +18,9 @@ const ABILITIES := {
 	"power": {"name": "斷電", "cost": 45.0, "cooldown": 60.0, "duration": 20.0,
 		"desc": "全場燈光熄滅 20 秒，出口也停擺。"},
 	"monster": {"name": "放出怪物", "cost": 60.0, "cooldown": 45.0, "duration": 0.0,
-		"desc": "在點的位置放出一隻怪物（撲燈蛾 / 擬態蟲 / 假人）。"},
+		"desc": "在點的位置放出一隻怪物（撲燈蛾 / 擬態蟲 / 發條鼠群 / 假人）。"},
 }
-const RELEASABLE := ["moth", "mimic", "mannequin"]
+const RELEASABLE := ["moth", "mimic", "rats", "mannequin"]
 const RELEASE_MIN_DISTANCE := 5.0  # never right on top of someone
 
 var energy := START_ENERGY
