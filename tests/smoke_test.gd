@@ -272,10 +272,13 @@ func _test_collector() -> void:
 	var collector: Collector = _monster(main, Collector)
 	_check(collector != null, "collector spawns")
 	player.global_position = Vector3(-13, 0.1, 18)  # tucked away in the tool room
+	player.set_lantern(false)
 	collector.global_position = Vector3(2, 0.1, 0)
-	main.run.host_spawn_loot(LootTable.ITEMS[3], collector.global_position + Vector3(0.4, 0.3, 0))
+	# Unfrozen, so it is taken whether the collector is wandering or (having spotted you) chasing.
+	main.run.host_spawn_loot(LootTable.ITEMS[3], collector.global_position + Vector3(0.4, 0.3, 0), 0.0, false)
 	await _frames(45)
 	_check(collector.cart_load >= 1, "it clears loot off the floor into its cart")
+	collector.state = Collector.State.WANDER
 	player.global_position = Vector3(2, 0.1, 8)
 	player.set_lantern(true)
 	await _frames(20)
