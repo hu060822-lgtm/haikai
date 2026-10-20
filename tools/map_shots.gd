@@ -3,6 +3,7 @@ extends SceneTree
 ## Run (needs a display): godot --path . --script res://tools/map_shots.gd -- <out_dir> [map]
 
 const SHOTS := {
+	"factory": [],
 	"mall": [
 		{"name": "mall_lobby", "pos": Vector3(0.0, 0.1, 21.0), "yaw": 0.0, "pitch": 0.05},
 		{"name": "mall_atrium", "pos": Vector3(-9.0, 0.1, 9.0), "yaw": -0.7, "pitch": 0.2},
@@ -64,6 +65,30 @@ func _run() -> void:
 			for i in 40:
 				await process_frame
 			_save(out_dir, shot.name)
+		# A few rooms from the random wings, seen from their clear centres.
+		var shown := 0
+		for grid in main.level.wings:
+			for room in grid.rooms:
+				if shown >= 4 or not room.wide or room.get("kit", "") == "":
+					continue
+				var c: Vector2i = room.cells[0]
+				var centre: Vector3 = grid._cell_centre(c)
+				var corner := Vector3(room.min.x if centre.x - room.min.x > room.max.x - centre.x else room.max.x, 0,
+					room.min.y if centre.z - room.min.y > room.max.y - centre.z else room.max.y)
+				var to := corner - centre
+				main.player.global_position = centre + Vector3(0, 0.1, 0)
+				main.player.rotation.y = atan2(-to.x, -to.z)
+				main.player.get_node("Head").rotation.x = -0.1
+				main.player.velocity = Vector3.ZERO
+				for i in 40:
+					await process_frame
+				_save(out_dir, "%s_wing_%d_%s" % [id, shown, room.kit])
+				shown += 1
+		if SHOTS[id].is_empty():
+			main.queue_free()
+			for i in 5:
+				await process_frame
+			continue
 		# After the objective: neon / headlights on.
 		main.run._lever_pulled()
 		var last: Dictionary = SHOTS[id][0]

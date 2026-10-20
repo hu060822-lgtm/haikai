@@ -278,7 +278,9 @@ func build_sync() -> void:
 	add_child(sync)
 
 
-## What other players see: a hunched scavenger in a long coat, with a name tag.
+## What other players see: a hunched scavenger in a long coat and a cap, with a scarf
+## over the chin, a heavy backpack and the lantern in hand, plus a name tag. Faceted
+## low-poly parts facing -z (the way the player looks).
 func _build_body() -> void:
 	_body = Node3D.new()
 	_body.name = "Body"
@@ -290,21 +292,66 @@ func _build_body() -> void:
 	var coat := PS1Materials.get_material("concrete", coat_color, true)
 	var skin := PS1Materials.get_material("concrete", Color(0.85, 0.72, 0.6), true)
 	var leather := PS1Materials.get_material("rust_metal", Color(0.5, 0.4, 0.3), true)
-	for part in [
-		[Vector3(0.5, 0.95, 0.32), Vector3(0, 0.95, 0), coat],
-		[Vector3(0.28, 0.3, 0.28), Vector3(0, 1.58, 0), skin],
-		[Vector3(0.34, 0.08, 0.34), Vector3(0, 1.75, 0), leather],
-		[Vector3(0.16, 0.5, 0.16), Vector3(-0.13, 0.25, 0), leather],
-		[Vector3(0.16, 0.5, 0.16), Vector3(0.13, 0.25, 0), leather],
-		[Vector3(0.42, 0.5, 0.22), Vector3(0, 1.05, 0.25), leather],
-	]:
+	var cloth := PS1Materials.get_material("concrete", Color(0.36, 0.34, 0.3), true)
+	var dark := PS1Materials.get_material("concrete", Color(0.08, 0.07, 0.06), true)
+	var brass := PS1Materials.get_material("brass", Color.WHITE, true)
+	var glass := PS1Materials.get_material("concrete", Color(1.0, 0.9, 0.6), true)
+	var add := func(mesh: Mesh, material: Material, pos: Vector3, rot := Vector3.ZERO, scale := Vector3.ONE) -> void:
 		var mesh_instance := MeshInstance3D.new()
-		var box := BoxMesh.new()
-		box.size = part[0]
-		mesh_instance.mesh = box
-		mesh_instance.position = part[1]
-		mesh_instance.material_override = part[2]
+		mesh_instance.mesh = LootShapes.with_uvs(mesh, 2.0)
+		mesh_instance.material_override = material
+		mesh_instance.transform = LowPoly.at(pos, rot, scale)
 		_body.add_child(mesh_instance)
+	# Legs and boots.
+	for side in [-1.0, 1.0]:
+		add.call(LowPoly.prism(5, 0.075, 0.095, 0.5), leather, Vector3(0.12 * side, 0.33, 0.0), Vector3(-4, 0, 0))
+		add.call(LowPoly.chamfer_box(Vector3(0.14, 0.11, 0.26), 0.035), dark, Vector3(0.12 * side, 0.055, -0.04))
+	# The long coat: a lathed shell, flared at the hem, leaning forward into a hunch.
+	var coat_profile := PackedVector2Array([Vector2(0.0, -0.52), Vector2(0.31, -0.52), Vector2(0.29, -0.3),
+		Vector2(0.25, 0.0), Vector2(0.26, 0.25), Vector2(0.27, 0.4), Vector2(0.2, 0.52), Vector2(0.1, 0.56), Vector2(0.0, 0.56)])
+	add.call(LowPoly.lathe(coat_profile, 8), coat, Vector3(0, 0.9, 0.02), Vector3(-9, 22.5, 0), Vector3(1.0, 1.0, 0.7))
+	# Coat flaps down the front and a belt.
+	add.call(LowPoly.chamfer_box(Vector3(0.05, 0.62, 0.03), 0.012), coat, Vector3(0.0, 0.66, -0.2), Vector3(-6, 0, 0))
+	add.call(LowPoly.prism(8, 0.255, 0.255, 0.06), leather, Vector3(0, 0.95, 0.0), Vector3(-9, 22.5, 0), Vector3(1.0, 1.0, 0.72))
+	add.call(LowPoly.chamfer_box(Vector3(0.07, 0.06, 0.03), 0.01), brass, Vector3(0, 0.95, -0.2))
+	# Scarf round the neck, pulled up over the chin.
+	add.call(LowPoly.lathe(PackedVector2Array([Vector2(0, -0.06), Vector2(0.15, -0.06), Vector2(0.16, 0.0),
+		Vector2(0.13, 0.08), Vector2(0, 0.08)]), 7), cloth, Vector3(0, 1.46, -0.06), Vector3(-12, 0, 0), Vector3(1.0, 1.0, 0.9))
+	# Head, pushed forward by the hunch: a lathed skull with a nose and two dark eyes.
+	var head_profile := PackedVector2Array([Vector2(0.0, -0.13), Vector2(0.08, -0.12), Vector2(0.12, -0.04),
+		Vector2(0.125, 0.05), Vector2(0.1, 0.12), Vector2(0.0, 0.15)])
+	add.call(LowPoly.lathe(head_profile, 7), skin, Vector3(0, 1.6, -0.09), Vector3(-8, 0, 0), Vector3(0.95, 1.0, 1.05))
+	add.call(LowPoly.prism(3, 0.025, 0.0, 0.05), skin, Vector3(0, 1.585, -0.215), Vector3(-80, 0, 0))
+	for side in [-1.0, 1.0]:
+		add.call(LowPoly.blob(0.018, Vector3(1.3, 0.8, 0.6), 0), dark, Vector3(0.048 * side, 1.625, -0.2))
+		# Ears.
+		add.call(LowPoly.blob(0.025, Vector3(0.5, 1.0, 0.8), 0), skin, Vector3(0.122 * side, 1.6, -0.08))
+	# A knit cap with a short brim.
+	add.call(LowPoly.lathe(PackedVector2Array([Vector2(0.0, 0.0), Vector2(0.135, 0.0), Vector2(0.14, 0.05),
+		Vector2(0.12, 0.11), Vector2(0.06, 0.15), Vector2(0.0, 0.16)]), 8), leather, Vector3(0, 1.67, -0.08), Vector3(-10, 22.5, 0))
+	add.call(LowPoly.extrude(PackedVector2Array([Vector2(-0.12, 0.0), Vector2(0.12, 0.0), Vector2(0.09, 0.08),
+		Vector2(0.0, 0.1), Vector2(-0.09, 0.08)]), 0.02), leather, Vector3(0, 1.69, -0.2), Vector3(-80, 0, 0))
+	# Arms in the coat's sleeves: the left hangs, the right holds the lantern out in front.
+	add.call(LowPoly.prism(5, 0.06, 0.085, 0.6), coat, Vector3(-0.27, 1.12, -0.04), Vector3(-8, 0, -10))
+	add.call(LowPoly.blob(0.055, Vector3(0.9, 1.1, 0.9), 0), skin, Vector3(-0.32, 0.8, -0.08))
+	add.call(LowPoly.prism(5, 0.06, 0.085, 0.36), coat, Vector3(0.27, 1.22, -0.1), Vector3(-35, 0, 8))
+	add.call(LowPoly.prism(5, 0.055, 0.065, 0.34), coat, Vector3(0.29, 1.02, -0.29), Vector3(-75, 0, 0))
+	add.call(LowPoly.blob(0.055, Vector3(0.9, 1.1, 0.9), 0), skin, Vector3(0.29, 0.98, -0.47))
+	# The lantern hangs from that hand by its ring.
+	var lantern := Vector3(0.29, 0.78, -0.48)
+	add.call(LootShapes.torus(0.05, 0.008, 6, 3), brass, lantern + Vector3(0, 0.15, 0), Vector3(90, 0, 0))
+	add.call(LowPoly.prism(6, 0.07, 0.03, 0.05), brass, lantern + Vector3(0, 0.09, 0))
+	add.call(LowPoly.prism(6, 0.05, 0.05, 0.13), glass, lantern)
+	add.call(LowPoly.prism(6, 0.07, 0.07, 0.03), brass, lantern + Vector3(0, -0.08, 0))
+	for corner in 3:
+		var angle := TAU * corner / 3.0 + 0.5
+		add.call(LowPoly.prism(4, 0.008, 0.008, 0.14), brass, lantern + Vector3(cos(angle) * 0.058, 0, sin(angle) * 0.058))
+	# The backpack: a scuffed canvas sack with a bedroll on top and two straps.
+	add.call(LowPoly.chamfer_box(Vector3(0.4, 0.5, 0.22), 0.06), leather, Vector3(0, 1.06, 0.28), Vector3(-9, 0, 0))
+	add.call(LowPoly.chamfer_box(Vector3(0.3, 0.16, 0.06), 0.03), leather, Vector3(0, 0.95, 0.4), Vector3(-9, 0, 0))
+	add.call(LowPoly.prism(7, 0.08, 0.08, 0.46), cloth, Vector3(0, 1.38, 0.31), Vector3(0, 0, 90))
+	for side in [-1.0, 1.0]:
+		add.call(LowPoly.chamfer_box(Vector3(0.05, 0.42, 0.03), 0.01), dark, Vector3(0.14 * side, 1.16, -0.19), Vector3(-14, 0, 0))
 	_name_label = Label3D.new()
 	_name_label.position.y = 2.05
 	_name_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED

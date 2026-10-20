@@ -98,6 +98,7 @@ func build() -> void:
 	bounds = AABB(Vector3(-24, -1.5, -24), Vector3(48, 8.0, 48))
 	overview_height = 7.0
 	_environment(PASTEL.sky, Color(1.0, 0.94, 0.9), 0.7, Color(1.0, 0.96, 0.94), 0.018, "lullaby", -24.0)
+	_plan_wings()
 	_build_corridor()
 	_build_living_room()
 	_build_entrance()
@@ -105,6 +106,49 @@ func build() -> void:
 	_build_dining()
 	_build_bedroom()
 	_build_pool()
+	_build_wings()
+	# The white door can open onto any room of the wings too.
+	for grid in wings:
+		for room in grid.rooms:
+			if room.wide:
+				dream_rooms.append(room.center + Vector3(0, 0.2, 0))
+
+
+## More of the house than there should be: rooms behind the playground, the dining room
+## and the pool, each one a little wrong.
+func _plan_wings() -> void:
+	var theme := {"clutter": "dream", "floor": "tile", "floor_tint": PASTEL.pink, "wall": "snow", "wall_tint": PASTEL.wall, "inner_wall": "snow",
+		"roof": "panel", "roof_tint": PASTEL.wall, "light": Color(1.0, 0.96, 0.9), "light_energy": 0.5, "density": 1.0}
+	var kits := [
+		RoomKits.kit("classroom", 1.5, {"tidy": true, "floor": "wood", "floor_tint": Color(0.95, 0.85, 0.72)}),
+		RoomKits.kit("bathroom", 1.0, {"max_count": 2, "floor_tint": PASTEL.sky}),
+		RoomKits.kit("nursery", 1.5, {"floor": "carpet", "floor_tint": PASTEL.lilac}),
+		RoomKits.kit("kitchen", 1.0, {"max_count": 2, "floor_tint": PASTEL.butter}),
+		RoomKits.kit("ball_room", 1.2, {"floor_tint": PASTEL.mint}),
+		RoomKits.kit("toy_room", 1.5, {"floor": "carpet", "floor_tint": PASTEL.butter}),
+		RoomKits.kit("living", 1.5, {"floor": "wood", "floor_tint": Color(0.95, 0.88, 0.8)}),
+		RoomKits.kit("vault", 1.0, {"deep": true, "min_depth": 2}),
+	]
+	# [name, origin, cols x rows, core side, ports, where the house's own wall runs along that side]
+	# The side wings stop short of the looping corridor, which runs on past the house.
+	# The bedroom gets no wing: its child-sized door is what keeps big things out.
+	for spec in [["north", Vector3(-24, 0, -60), Vector2i(4, 3), Vector2i(0, 1), [Vector2i(0, 2), Vector2i(3, 2)], [Vector2(-24, -5), Vector2(5, 24)]],
+			["south", Vector3(-24, 0, 24), Vector2i(4, 3), Vector2i(0, -1), [Vector2i(3, 0)], [Vector2(-24, -5), Vector2(5, 24)]],
+			["west", Vector3(-60, 0, -38), Vector2i(3, 3), Vector2i(1, 0), [Vector2i(2, 1)], [Vector2(-24, -1.6)]],
+			["east", Vector3(24, 0, -38), Vector2i(3, 3), Vector2i(-1, 0), [Vector2i(0, 2)], [Vector2(-24, -1.6)]],
+			["pool_wing", Vector3(24, 0, 2), Vector2i(3, 3), Vector2i(-1, 0), [Vector2i(0, 0)], [Vector2(1.6, 24)]]]:
+		var grid := RoomGrid.new()
+		grid.name = spec[0]
+		grid.origin = spec[1]
+		grid.cols = spec[2].x
+		grid.rows = spec[2].y
+		grid.core_side = spec[3]
+		grid.core_spans.assign(spec[5])
+		grid.ports.assign(spec[4])
+		grid.dark_chance = 0.0
+		grid.theme = theme
+		grid.kits = kits
+		_plan_wing(grid)
 
 
 func _physics_process(delta: float) -> void:
@@ -243,8 +287,8 @@ func _build_entrance() -> void:
 func _build_playground() -> void:
 	# Indoors, under a painted sky ceiling, much too big.
 	_room(Vector2(-24, -24), Vector2(-5, -1.6), "snow", Color(1.0, 0.93, 0.78), PASTEL.sky, 6.5)
-	_wall(Vector3(-24, 0, -24), Vector3(-5, 0, -24), 6.5, "panel", [], 0.2, PASTEL.sky)
-	_wall(Vector3(-24, 0, -24), Vector3(-24, 0, -1.6), 6.5, "panel", [], 0.2, PASTEL.sky)
+	_wall_with_ports(Vector3(-24, 0, -24), Vector3(-5, 0, -24), 6.5, "panel", 0.2, PASTEL.sky)
+	_wall_with_ports(Vector3(-24, 0, -24), Vector3(-24, 0, -1.6), 6.5, "panel", 0.2, PASTEL.sky)
 	_wall(Vector3(-5, 0, -24), Vector3(-5, 0, -12), 6.5, "panel", [], 0.2, PASTEL.sky)
 	_box(Vector3(19, 1.7, 0.2), Vector3(-14.5, ROOM_H + 0.85, -1.6), "panel", Vector3.ZERO, Layers.WORLD, PASTEL.sky)
 	# Slide.
@@ -267,8 +311,8 @@ func _build_playground() -> void:
 
 func _build_dining() -> void:
 	_room(Vector2(5, -24), Vector2(24, -1.6), "wood", Color(0.95, 0.88, 0.78), PASTEL.butter)
-	_wall(Vector3(5, 0, -24), Vector3(24, 0, -24), ROOM_H, "panel", [], 0.2, PASTEL.butter)
-	_wall(Vector3(24, 0, -24), Vector3(24, 0, -1.6), ROOM_H, "panel", [], 0.2, PASTEL.butter)
+	_wall_with_ports(Vector3(5, 0, -24), Vector3(24, 0, -24), ROOM_H, "panel", 0.2, PASTEL.butter)
+	_wall_with_ports(Vector3(24, 0, -24), Vector3(24, 0, -1.6), ROOM_H, "panel", 0.2, PASTEL.butter)
 	_wall(Vector3(5, 0, -24), Vector3(5, 0, -12), ROOM_H, "panel", [], 0.2, PASTEL.butter)
 	# The long table, laid for a party nobody came to.
 	_box(Vector3(10.0, 0.1, 1.8), Vector3(15.5, 0.8, -14.5), "wood", Vector3.ZERO, Layers.WORLD, Color(1.0, 1.0, 0.98))
@@ -318,8 +362,8 @@ func _build_bedroom() -> void:
 func _build_pool() -> void:
 	# A pool room of small white tiles, the water perfectly still and ankle-deep.
 	_room(Vector2(5, 1.6), Vector2(24, 24), "snow", Color(0.92, 0.97, 1.0), PASTEL.wall)
-	_wall(Vector3(5, 0, 24), Vector3(24, 0, 24), ROOM_H, "snow", [], 0.2, Color(0.9, 0.96, 1.0))
-	_wall(Vector3(24, 0, 1.6), Vector3(24, 0, 24), ROOM_H, "snow", [], 0.2, Color(0.9, 0.96, 1.0))
+	_wall_with_ports(Vector3(5, 0, 24), Vector3(24, 0, 24), ROOM_H, "snow", 0.2, Color(0.9, 0.96, 1.0))
+	_wall_with_ports(Vector3(24, 0, 1.6), Vector3(24, 0, 24), ROOM_H, "snow", 0.2, Color(0.9, 0.96, 1.0))
 	_wall(Vector3(5, 0, 14), Vector3(5, 0, 24), ROOM_H, "snow", [], 0.2, Color(0.9, 0.96, 1.0))
 	_glow(Vector3(8, 0.02, 8), Vector3(15, 0.02, 14), Color(0.55, 0.85, 1.0))
 	for side in [-1.0, 1.0]:

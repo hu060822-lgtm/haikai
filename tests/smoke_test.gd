@@ -40,6 +40,7 @@ func _run() -> void:
 	await _test_squads()
 	Run.forced_monsters = ["colossus"]
 	await _test_maps()
+	await _test_wings()
 	print("SMOKE TEST %s (%d failures)" % ["PASSED" if _failures == 0 else "FAILED", _failures])
 	quit(1 if _failures > 0 else 0)
 
@@ -611,7 +612,7 @@ func _test_field_control() -> void:
 	var player: Player = main.player
 	var field: FieldControl = main.run.field
 	var level: BoilerFactory = main.level
-	_check(level.gates.size() == 4, "the factory has 4 gates")
+	_check(level.gates.size() >= 4, "the factory has its 4 gates, plus any in the wings")
 	var before := field.energy
 	GameNoise.emit(self, player.global_position, 14.0, GameNoise.Kind.FOOTSTEP)
 	_check(field.energy > before, "scavenger noise feeds the guardian's energy")
@@ -763,6 +764,25 @@ func _test_maps() -> void:
 				await _test_afternoon(main, level as EndlessAfternoon, player)
 		await _end_run(main)
 	Run.forced_map = "factory"
+
+
+## Every map grows random side wings; the same seed must give every peer the same layout.
+func _test_wings() -> void:
+	print("wings")
+	for id in MapRoster.MAPS:
+		var layouts := []
+		for seed in [7, 7, 8]:
+			var level: GameMap = MapRoster.create(id)
+			level.rng.seed = seed
+			root.add_child(level)
+			var room_count: int = level.wings.reduce(func(n: int, w: RoomGrid) -> int: return n + w.rooms.size(), 0)
+			layouts.append([room_count, level.loot_spots.duplicate(), level.bounds])
+			level.free()
+		_check(layouts[0][0] >= 10, "%s: wings add rooms (%d)" % [id, layouts[0][0]])
+		_check(layouts[0][1] == layouts[1][1], "%s: same seed, same layout" % id)
+		_check(layouts[0][1] != layouts[2][1], "%s: other seed, other layout" % id)
+		_check(layouts[0][2].size.x * layouts[0][2].size.z >= 9000.0, "%s: map is big (%s)" % [id, layouts[0][2].size])
+		await _frames(1)
 
 
 func _test_mall(_main: Node, level: GameMap, player: Player) -> void:

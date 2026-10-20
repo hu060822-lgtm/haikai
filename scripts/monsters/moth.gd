@@ -119,11 +119,34 @@ func _scream() -> void:
 func _build_model() -> void:
 	var body_material := PS1Materials.get_material("concrete", Color(0.55, 0.5, 0.42), true)
 	var wing_material := PS1Materials.get_material("concrete", Color(0.8, 0.74, 0.6), true)
-	MonsterKit.sphere(self, 0.07, Vector3.ZERO, body_material, Vector3(0.8, 0.8, 2.2))
+	var spot_material := PS1Materials.get_material("concrete", Color(0.35, 0.28, 0.22), true)
+	var eye_material := PS1Materials.get_material("concrete", Color(0.3, 0.2, 0.1), true, Vector2.ONE, Color(0.6, 0.45, 0.2))
+	# A furry segmented abdomen trailing behind (+z), a fat thorax and a small head (-z).
+	var abdomen := PackedVector2Array([Vector2(0.0, -0.1), Vector2(0.03, -0.09), Vector2(0.05, -0.05),
+		Vector2(0.045, -0.04), Vector2(0.06, 0.0), Vector2(0.055, 0.02), Vector2(0.06, 0.05), Vector2(0.0, 0.08)])
+	MonsterKit.part(self, _uv(LowPoly.lathe(abdomen, 6)), Vector3(0, -0.005, 0.12), body_material, Vector3(90, 0, 0), Vector3(1.0, 0.85, 1.0))
+	MonsterKit.part(self, _uv(LowPoly.blob(0.062, Vector3(1.0, 0.9, 1.1), 1, 0.18, 4)), Vector3(0, 0.0, 0.0), body_material)
+	MonsterKit.part(self, _uv(LowPoly.blob(0.04, Vector3(1.1, 0.9, 0.9), 0, 0.05, 1)), Vector3(0, -0.005, -0.08), body_material)
+	for side in [-1.0, 1.0]:
+		MonsterKit.part(self, LowPoly.blob(0.016, Vector3.ONE, 0), Vector3(0.03 * side, 0.005, -0.1), eye_material)
+		# Feathery antennae swept back over the head.
+		var antenna := PackedVector3Array([Vector3(0.015 * side, 0.025, -0.1), Vector3(0.05 * side, 0.07, -0.14), Vector3(0.1 * side, 0.08, -0.13)])
+		MonsterKit.part(self, LowPoly.tube(antenna, PackedFloat32Array([0.006, 0.009, 0.0]), 3), Vector3.ZERO, body_material)
+	# Wings on hinges at the thorax (the flap animates the hinges' z rotation): a forewing
+	# swept forward and a rounded hindwing, cut from one flat outline, with a dark eyespot.
 	for side in [-1.0, 1.0]:
 		var hinge := Node3D.new()
 		add_child(hinge)
-		MonsterKit.box(hinge, Vector3(0.3, 0.01, 0.22), Vector3(0.15 * side, 0, 0.02), wing_material)
+		var outline := PackedVector2Array()
+		for p in [Vector2(0.02, -0.05), Vector2(0.12, -0.11), Vector2(0.24, -0.12), Vector2(0.31, -0.08),
+				Vector2(0.27, -0.01), Vector2(0.19, 0.03), Vector2(0.22, 0.09), Vector2(0.17, 0.15),
+				Vector2(0.09, 0.15), Vector2(0.02, 0.07)]:
+			outline.append(Vector2(p.x * side, p.y))
+		if side < 0.0:
+			outline.reverse()
+		MonsterKit.part(hinge, _uv(LowPoly.extrude(outline, 0.008)), Vector3(0, 0.01, 0.02), wing_material, Vector3(90, 0, 0))
+		MonsterKit.part(hinge, LowPoly.prism(6, 0.03, 0.03, 0.01), Vector3(0.19 * side, 0.016, -0.04), spot_material, Vector3(0, 0, 0), Vector3(1.0, 1.0, 0.8))
+		MonsterKit.part(hinge, LowPoly.prism(5, 0.022, 0.022, 0.01), Vector3(0.14 * side, 0.016, 0.1), spot_material)
 		_wings.append(hinge)
 	# Two dim eyes so it reads in the dark.
 	var eyes := OmniLight3D.new()
@@ -131,3 +154,7 @@ func _build_model() -> void:
 	eyes.light_energy = 0.25
 	eyes.omni_range = 0.8
 	add_child(eyes)
+
+
+static func _uv(mesh: Mesh) -> Mesh:
+	return LootShapes.with_uvs(mesh, 6.0)

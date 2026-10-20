@@ -24,7 +24,7 @@ const LOOT_SPOTS := [
 
 const PATROL_POINTS := [
 	Vector3(0, 0, 10), Vector3(6, 0, -6), Vector3(-6, 0, -6), Vector3(8, 0, 2),
-	Vector3(-8, 0, 2), Vector3(0, 0, -8), Vector3(8, 0, -17), Vector3(-9, 0, -18),
+	Vector3(-8, 0, 2), Vector3(0, 0, -8), Vector3(8, 0, -14), Vector3(-9, 0, -18),
 	Vector3(4, 0, 17), Vector3(-6, 0, 18), Vector3(0, 0, 0),
 ]
 
@@ -48,6 +48,7 @@ func build() -> void:
 	loot_count = Vector2i(LOOT_MIN, LOOT_MAX)
 	bounds = AABB(Vector3(-15.5, -0.5, -21.5), Vector3(31, 7.5, 43))
 	_build_environment()
+	_plan_wings()
 	_build_shell()
 	_build_boiler()
 	_build_catwalks()
@@ -58,6 +59,7 @@ func build() -> void:
 	_build_lights()
 	_build_extraction()
 	_build_gates()
+	_build_wings()
 
 
 func _on_objective() -> void:
@@ -69,13 +71,43 @@ func _build_environment() -> void:
 	_environment(Color(0.02, 0.018, 0.016), Color(0.22, 0.2, 0.26), 0.35, Color(0.05, 0.045, 0.04), 0.06)
 
 
+## Random wings of back rooms on all four sides: storage, pump rooms, workshops, offices.
+func _plan_wings() -> void:
+	var theme := {"clutter": "industrial", "floor": "concrete", "floor_tint": Color(0.8, 0.78, 0.75), "wall": "brick", "wall_tint": Color(0.85, 0.8, 0.75),
+		"inner_wall": "rust_metal", "roof": "rust_metal", "roof_tint": Color(0.6, 0.55, 0.5),
+		"light": Color(1.0, 0.8, 0.5), "light_energy": 0.55}
+	var kits := [
+		RoomKits.kit("storage", 3.0), RoomKits.kit("pump_room", 2.0), RoomKits.kit("workshop", 2.0),
+		RoomKits.kit("locker_room", 1.0, {"max_count": 2}), RoomKits.kit("coal_bunker", 1.5, {"floor_tint": Color(0.45, 0.42, 0.4)}),
+		RoomKits.kit("office", 1.5, {"floor": "carpet", "floor_tint": Color(0.45, 0.4, 0.35), "lit": true}),
+		RoomKits.kit("boiler_annex", 1.0, {"min_cells": 2, "max_count": 1}),
+		RoomKits.kit("vault", 1.0, {"deep": true, "min_depth": 2}), RoomKits.kit("bare", 1.0),
+	]
+	for spec in [
+		["west", Vector3(-53, 0, -18), 3, 3, Vector2i(1, 0), [Vector2i(2, 0), Vector2i(2, 1)]],
+		["east", Vector3(17, 0, -18), 3, 3, Vector2i(-1, 0), [Vector2i(0, 0), Vector2i(0, 1)]],
+		["north", Vector3(-12, 0, -59), 2, 3, Vector2i(0, 1), [Vector2i(0, 2)]],
+		["south", Vector3(-12, 0, 23), 2, 3, Vector2i(0, -1), [Vector2i(0, 0), Vector2i(1, 0)]],
+	]:
+		var grid := RoomGrid.new()
+		grid.name = spec[0]
+		grid.origin = spec[1]
+		grid.cols = spec[2]
+		grid.rows = spec[3]
+		grid.core_side = spec[4]
+		grid.ports.assign(spec[5])
+		grid.theme = theme
+		grid.kits = kits
+		_plan_wing(grid)
+
+
 func _build_shell() -> void:
 	_box(Vector3(32, 1, 44), Vector3(0, -0.5, 0), "concrete")
 	_box(Vector3(32, 1, 44), Vector3(0, 12.5, 0), "rust_metal")
-	_box(Vector3(32, 13, 1), Vector3(0, 6, -22.5), "brick")
-	_box(Vector3(32, 13, 1), Vector3(0, 6, 22.5), "brick")
-	_box(Vector3(1, 13, 44), Vector3(16.5, 6, 0), "brick")
-	_box(Vector3(1, 13, 44), Vector3(-16.5, 6, 0), "brick")
+	_wall_with_ports(Vector3(-17, 0, -22.5), Vector3(17, 0, -22.5), 12.5, "brick", 1.0)
+	_wall_with_ports(Vector3(-17, 0, 22.5), Vector3(17, 0, 22.5), 12.5, "brick", 1.0)
+	_wall_with_ports(Vector3(16.5, 0, -22), Vector3(16.5, 0, 22), 12.5, "brick", 1.0)
+	_wall_with_ports(Vector3(-16.5, 0, -22), Vector3(-16.5, 0, 22), 12.5, "brick", 1.0)
 
 
 func _build_boiler() -> void:

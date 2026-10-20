@@ -194,18 +194,70 @@ func _apply_pose() -> void:
 func _build_model() -> void:
 	_model = Node3D.new()
 	add_child(_model)
-	var plastic := PS1Materials.get_material("concrete", Color(0.92, 0.88, 0.82), true)
-	var joint := PS1Materials.get_material("rust_metal", Color(0.4, 0.35, 0.3), true)
-	MonsterKit.box(_model, Vector3(0.42, 0.62, 0.24), Vector3(0, 1.32, 0), plastic)
-	MonsterKit.box(_model, Vector3(0.36, 0.2, 0.22), Vector3(0, 0.92, 0), plastic)
-	MonsterKit.box(_model, Vector3(0.06, 0.12, 0.06), Vector3(0, 1.68, 0), joint)
+	var plastic := PS1Materials.get_material("concrete", Color(0.92, 0.88, 0.82))
+	var joint := PS1Materials.get_material("rust_metal", Color(0.4, 0.35, 0.3))
+	var paper := PS1Materials.get_material("concrete", Color(0.85, 0.8, 0.62))
+	# One moulded shell from hips to shoulders, flattened front to back like a shop dummy.
+	var torso := PackedVector2Array([Vector2(0.0, 0.8), Vector2(0.15, 0.82), Vector2(0.19, 0.9),
+		Vector2(0.16, 0.99), Vector2(0.145, 1.08), Vector2(0.19, 1.24), Vector2(0.215, 1.4),
+		Vector2(0.205, 1.52), Vector2(0.12, 1.6), Vector2(0.0, 1.63)])
+	MonsterKit.part(_model, LowPoly.lathe(torso, 8), Vector3.ZERO, plastic, Vector3(0, 22.5, 0), Vector3(1, 1, 0.6))
+	# The seam where the torso twists off the hips, and the bolt-on neck.
+	MonsterKit.part(_model, LowPoly.prism(8, 0.158, 0.158, 0.03), Vector3(0, 1.035, 0), joint, Vector3(0, 22.5, 0), Vector3(1, 1, 0.62))
+	MonsterKit.part(_model, LowPoly.prism(6, 0.05, 0.042, 0.14), Vector3(0, 1.67, 0), joint)
 	_head = Node3D.new()
 	_head.position = Vector3(0, 1.74, 0)
 	_model.add_child(_head)
-	# A smooth egg with no face.
-	MonsterKit.sphere(_head, 0.14, Vector3(0, 0.13, 0), plastic, Vector3(1.0, 1.35, 1.05))
-	for side in [-1.0, 1.0]:
-		_arms.append(MonsterKit.limb(_model, Vector3(0.27 * side, 1.6, 0), Vector3(0.09, 0.72, 0.09), plastic))
-		_legs.append(MonsterKit.limb(_model, Vector3(0.11 * side, 0.84, 0), Vector3(0.12, 0.84, 0.12), plastic))
+	# A smooth egg with no face: only the ghost of a nose and a chin.
+	var egg := PackedVector2Array([Vector2(0.0, 0.0), Vector2(0.07, 0.015), Vector2(0.12, 0.07),
+		Vector2(0.14, 0.15), Vector2(0.135, 0.23), Vector2(0.1, 0.3), Vector2(0.05, 0.34), Vector2(0.0, 0.355)])
+	MonsterKit.part(_head, LowPoly.lathe(egg, 8), Vector3.ZERO, plastic, Vector3(0, 22.5, 0), Vector3(1, 1, 1.05))
+	MonsterKit.part(_head, LowPoly.blob(0.032, Vector3(0.55, 1.3, 0.8), 0), Vector3(0, 0.16, -0.132), plastic)
+	MonsterKit.part(_head, LowPoly.blob(0.05, Vector3(1.0, 0.6, 0.8), 0), Vector3(0, 0.05, -0.1), plastic)
+	for side: float in [-1.0, 1.0]:
+		var arm := Node3D.new()
+		arm.position = Vector3(0.27 * side, 1.6, 0)
+		_model.add_child(arm)
+		_arms.append(arm)
+		_build_arm(arm, side, plastic, joint, paper)
+		var leg := Node3D.new()
+		leg.position = Vector3(0.11 * side, 0.84, 0)
+		_model.add_child(leg)
+		_legs.append(leg)
+		_build_leg(leg, plastic, joint)
 	# The pole stand it was taken off of still sticks out of its back.
-	MonsterKit.box(_model, Vector3(0.04, 0.04, 0.35), Vector3(0, 1.1, 0.25), joint)
+	MonsterKit.part(_model, LowPoly.prism(8, 0.06, 0.06, 0.025), Vector3(0, 1.1, 0.1), joint, Vector3(90, 0, 0))
+	MonsterKit.part(_model, LowPoly.prism(6, 0.022, 0.022, 0.34), Vector3(0, 1.1, 0.27), joint, Vector3(90, 0, 0))
+	MonsterKit.part(_model, LowPoly.chamfer_box(Vector3(0.08, 0.06, 0.05), 0.012), Vector3(0, 1.1, 0.44), joint)
+
+
+## A jointed plastic arm hanging from its shoulder pivot, hand and all.
+func _build_arm(arm: Node3D, side: float, plastic: Material, joint: Material, paper: Material) -> void:
+	MonsterKit.part(arm, LowPoly.blob(0.058, Vector3.ONE, 0), Vector3.ZERO, joint)
+	MonsterKit.part(arm, LowPoly.tube(PackedVector3Array([Vector3(0, 0.0, 0), Vector3(0, -0.17, 0.005),
+		Vector3(0, -0.34, 0)]), PackedFloat32Array([0.055, 0.05, 0.042]), 6), Vector3.ZERO, plastic)
+	MonsterKit.part(arm, LowPoly.tube(PackedVector3Array([Vector3(0, -0.34, 0), Vector3(0, -0.5, -0.025),
+		Vector3(0, -0.63, -0.035)]), PackedFloat32Array([0.042, 0.037, 0.029]), 6), Vector3.ZERO, plastic)
+	# The hands twist off at the wrist.
+	MonsterKit.part(arm, LowPoly.prism(6, 0.034, 0.034, 0.018), Vector3(0, -0.632, -0.035), joint)
+	var hand := PackedVector2Array([Vector2(0.03, 0.0), Vector2(0.032, -0.07), Vector2(0.026, -0.13),
+		Vector2(0.006, -0.15), Vector2(-0.018, -0.13), Vector2(-0.026, -0.07), Vector2(-0.05, -0.085),
+		Vector2(-0.058, -0.065), Vector2(-0.03, -0.012)])
+	MonsterKit.part(arm, LowPoly.extrude(hand, 0.03), Vector3(0, -0.638, -0.035), plastic, Vector3(0, -90, 0))
+	if side < 0.0:
+		# A price tag still hangs off one wrist.
+		MonsterKit.part(arm, LowPoly.prism(3, 0.004, 0.004, 0.06), Vector3(0.035, -0.66, -0.035), paper)
+		MonsterKit.part(arm, LowPoly.chamfer_box(Vector3(0.006, 0.05, 0.035), 0.003), Vector3(0.04, -0.71, -0.035), paper, Vector3(0, 0, 8))
+
+
+## A leg hanging from its hip pivot: thigh, knee, shin and a pointed display foot.
+func _build_leg(leg: Node3D, plastic: Material, joint: Material) -> void:
+	MonsterKit.part(leg, LowPoly.tube(PackedVector3Array([Vector3(0, 0.03, 0), Vector3(0, -0.2, -0.008),
+		Vector3(0, -0.41, 0)]), PackedFloat32Array([0.085, 0.075, 0.055]), 6), Vector3.ZERO, plastic)
+	MonsterKit.part(leg, LowPoly.blob(0.056, Vector3(1.0, 0.9, 1.05), 0), Vector3(0, -0.41, -0.005), plastic)
+	MonsterKit.part(leg, LowPoly.tube(PackedVector3Array([Vector3(0, -0.41, 0), Vector3(0, -0.56, 0.012),
+		Vector3(0, -0.77, 0)]), PackedFloat32Array([0.054, 0.048, 0.034]), 6), Vector3.ZERO, plastic)
+	MonsterKit.part(leg, LowPoly.prism(6, 0.037, 0.037, 0.016), Vector3(0, -0.765, 0), joint)
+	var foot := PackedVector2Array([Vector2(-0.05, 0.0), Vector2(0.15, 0.0), Vector2(0.18, 0.015),
+		Vector2(0.1, 0.045), Vector2(0.03, 0.085), Vector2(-0.03, 0.09), Vector2(-0.06, 0.05)])
+	MonsterKit.part(leg, LowPoly.extrude(foot, 0.08), Vector3(0, -0.84, 0), plastic, Vector3(0, 90, 0))

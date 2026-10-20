@@ -218,13 +218,63 @@ func _nav_ready() -> bool:
 func _build_model() -> void:
 	_model = Node3D.new()
 	add_child(_model)
-	_chalk = PS1Materials.get_material("concrete", Color(0.95, 0.95, 0.92), true, Vector2.ONE, Color(0.3, 0.3, 0.3))
-	_shadow = PS1Materials.get_material("concrete", Color(0.12, 0.12, 0.14), true)
-	_parts.append(MonsterKit.box(_model, Vector3(0.44, 0.7, 0.24), Vector3(0, 1.25, 0), _shadow))
-	_parts.append(MonsterKit.sphere(_model, 0.15, Vector3(0, 1.75, 0), _shadow, Vector3(1.0, 1.25, 1.0)))
-	for side in [-1.0, 1.0]:
-		var leg := MonsterKit.limb(_model, Vector3(0.12 * side, 0.9, 0), Vector3(0.12, 0.9, 0.12), _shadow)
-		_parts.append(leg.get_child(0))
-		var arm := MonsterKit.limb(_model, Vector3(0.3 * side, 1.55, 0), Vector3(0.08, 0.85, 0.08), _shadow)
+	_chalk = PS1Materials.get_material("concrete", Color(0.95, 0.95, 0.92), false, Vector2.ONE, Color(0.3, 0.3, 0.3))
+	_shadow = PS1Materials.get_material("concrete", Color(0.12, 0.12, 0.14))
+	# Too tall and too thin: a narrow pelvis, a pinched waist, a cage of a chest.
+	var torso := PackedVector2Array([Vector2(0.0, 0.86), Vector2(0.13, 0.88), Vector2(0.15, 0.95),
+		Vector2(0.105, 1.08), Vector2(0.15, 1.28), Vector2(0.195, 1.46), Vector2(0.17, 1.57),
+		Vector2(0.08, 1.63), Vector2(0.0, 1.64)])
+	_shape(_model, LowPoly.lathe(torso, 7), Vector3.ZERO, Vector3(0, 0, 0), Vector3(1, 1, 0.55))
+	# Ribs standing out of the chest.
+	for i in 3:
+		var y := 1.3 + i * 0.075
+		var r := 0.152 + i * 0.016
+		var rib := PackedVector3Array()
+		for a: float in [-80.0, -40.0, 0.0, 40.0, 80.0]:
+			var t := deg_to_rad(a)
+			rib.append(Vector3(sin(t) * r, y - absf(a) * 0.0006, -cos(t) * r * 0.58))
+		_shape(_model, LowPoly.tube(rib, PackedFloat32Array([0.006, 0.011, 0.012, 0.011, 0.006]), 4), Vector3.ZERO)
+	# Bony shoulders hunched up round a long neck, the head hanging forward.
+	for side: float in [-1.0, 1.0]:
+		_shape(_model, LowPoly.blob(0.07, Vector3(1.2, 0.8, 0.9), 0, 0.1, 4), Vector3(0.22 * side, 1.56, 0.0))
+	_shape(_model, LowPoly.tube(PackedVector3Array([Vector3(0, 1.6, 0.02), Vector3(0, 1.68, 0.0),
+		Vector3(0, 1.74, -0.05)]), PackedFloat32Array([0.05, 0.04, 0.038]), 6), Vector3.ZERO)
+	# A long smooth skull without a face, and the jaw hanging open beneath it.
+	var skull := PackedVector2Array([Vector2(0.0, -0.13), Vector2(0.055, -0.12), Vector2(0.095, -0.04),
+		Vector2(0.11, 0.06), Vector2(0.095, 0.15), Vector2(0.045, 0.2), Vector2(0.0, 0.21)])
+	_shape(_model, LowPoly.lathe(skull, 7), Vector3(0, 1.8, -0.07), Vector3(-14, 0, 0), Vector3(0.95, 1, 1.05))
+	_shape(_model, LowPoly.blob(0.06, Vector3(1.0, 1.5, 0.9), 0, 0.12, 9), Vector3(0, 1.66, -0.13), Vector3(-25, 0, 0))
+	for side: float in [-1.0, 1.0]:
+		var leg := Node3D.new()
+		leg.position = Vector3(0.12 * side, 0.9, 0)
+		_model.add_child(leg)
+		_shape(leg, LowPoly.tube(PackedVector3Array([Vector3(0, 0.02, 0), Vector3(0, -0.2, -0.01),
+			Vector3(0, -0.44, 0.0)]), PackedFloat32Array([0.065, 0.055, 0.042]), 6), Vector3.ZERO)
+		_shape(leg, LowPoly.blob(0.048, Vector3(1.0, 1.1, 1.0), 0), Vector3(0, -0.45, -0.01))
+		_shape(leg, LowPoly.tube(PackedVector3Array([Vector3(0, -0.45, 0), Vector3(0, -0.66, 0.015),
+			Vector3(0, -0.86, 0.02)]), PackedFloat32Array([0.042, 0.035, 0.026]), 6), Vector3.ZERO)
+		_shape(leg, LowPoly.tube(PackedVector3Array([Vector3(0, -0.85, 0.04), Vector3(0, -0.885, -0.06),
+			Vector3(0, -0.895, -0.17)]), PackedFloat32Array([0.04, 0.032, 0.0]), 5), Vector3.ZERO)
+		var arm := Node3D.new()
+		arm.position = Vector3(0.3 * side, 1.55, 0)
 		arm.rotation.z = 0.12 * side
-		_parts.append(arm.get_child(0))
+		_model.add_child(arm)
+		_shape(arm, LowPoly.tube(PackedVector3Array([Vector3(0, 0.02, 0), Vector3(0, -0.2, 0.02),
+			Vector3(0, -0.4, 0.02)]), PackedFloat32Array([0.045, 0.04, 0.033]), 6), Vector3.ZERO)
+		_shape(arm, LowPoly.blob(0.036, Vector3.ONE, 0), Vector3(0, -0.4, 0.025))
+		_shape(arm, LowPoly.tube(PackedVector3Array([Vector3(0, -0.4, 0.02), Vector3(0, -0.6, -0.01),
+			Vector3(0, -0.8, -0.04)]), PackedFloat32Array([0.033, 0.028, 0.022]), 6), Vector3.ZERO)
+		# Hands with fingers far too long, hanging open.
+		_shape(arm, LowPoly.blob(0.04, Vector3(0.55, 1.0, 0.9), 0), Vector3(0, -0.84, -0.04))
+		for f in 4:
+			var fz := -0.07 + f * 0.022
+			var fx := (0.012 if f == 0 else -0.004) * side
+			_shape(arm, LowPoly.tube(PackedVector3Array([Vector3(fx, -0.86, fz), Vector3(fx * 1.5, -0.97, fz - 0.012 * (1.5 - f)),
+				Vector3(fx * 2.0 - 0.01 * side, -1.06, fz - 0.02 * (1.5 - f) + 0.02)]), PackedFloat32Array([0.011, 0.008, 0.0]), 3), Vector3.ZERO)
+
+
+## One part of the body: every part swaps between shadow and chalk together.
+func _shape(parent: Node3D, mesh: Mesh, pos: Vector3, rot_deg := Vector3.ZERO, scale := Vector3.ONE) -> MeshInstance3D:
+	var part := MonsterKit.part(parent, mesh, pos, _shadow, rot_deg, scale)
+	_parts.append(part)
+	return part

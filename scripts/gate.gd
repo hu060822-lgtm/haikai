@@ -15,9 +15,7 @@ func _ready() -> void:
 	collision_layer = 0
 	collision_mask = 0
 	_shutter = MeshInstance3D.new()
-	var box := BoxMesh.new()
-	box.size = size
-	_shutter.mesh = box
+	_shutter.mesh = _shutter_mesh(size)
 	_shutter.material_override = PS1Materials.get_material("rust_metal", Color(0.75, 0.7, 0.55), true)
 	add_child(_shutter)
 	_collider = CollisionShape3D.new()
@@ -25,11 +23,9 @@ func _ready() -> void:
 	shape.size = size
 	_collider.shape = shape
 	add_child(_collider)
-	# A hazard stripe so it reads as a gate even in the dark.
+	# A hazard stripe so it reads as a gate even in the dark: the heavy bottom bar.
 	var stripe := MeshInstance3D.new()
-	var stripe_box := BoxMesh.new()
-	stripe_box.size = Vector3(size.x + 0.02, 0.12, size.z + 0.02)
-	stripe.mesh = stripe_box
+	stripe.mesh = LootShapes.with_uvs(LowPoly.chamfer_box(Vector3(size.x + 0.02, 0.12, size.z + 0.02), 0.03), 2.0)
 	stripe.material_override = PS1Materials.get_material("brass", Color(1.0, 0.8, 0.2), true)
 	stripe.position.y = -size.y / 2.0 + 0.1
 	_shutter.add_child(stripe)
@@ -70,3 +66,17 @@ func is_blocked(players: Array) -> bool:
 		if absf(local.x) < size.x / 2.0 + 0.35 and absf(local.z) < size.z / 2.0 + 0.35 and local.y > -size.y:
 			return true
 	return false
+
+
+## A roll-down shutter: rounded steel slats stacked up the doorway, with guide-rail
+## edges down both sides. Fills the gate's size box.
+static func _shutter_mesh(box: Vector3) -> Mesh:
+	var parts := []
+	var count := maxi(int(round(box.y / 0.16)), 2)
+	var pitch := box.y / count
+	for i in count:
+		var y := -box.y / 2.0 + pitch * (i + 0.5)
+		parts.append([LowPoly.prism(6, box.x * 0.42, box.x * 0.42, box.z * 0.96), LowPoly.at(Vector3(0, y, 0), Vector3(90, 0, 0), Vector3(1.0, pitch / (box.x * 0.75), 1.0))])
+	for side in [-1.0, 1.0]:
+		parts.append([LowPoly.chamfer_box(Vector3(box.x, box.y, 0.04), 0.01), LowPoly.at(Vector3(0, 0, (box.z / 2.0 - 0.02) * side))])
+	return LootShapes.with_uvs(LowPoly.merge(parts), 1.5)

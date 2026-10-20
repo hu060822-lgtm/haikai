@@ -21,21 +21,18 @@ func _ready() -> void:
 		if body is Player:
 			body.exit_ladder())
 
-	# Two rails and rungs, purely visual.
+	# Two rails and rungs, purely visual: hexagonal steel bars with bolted rail feet,
+	# merged into one mesh.
 	var material := PS1Materials.get_material("rust_metal", Color(0.9, 0.8, 0.7), true)
+	var parts := []
 	for x in [-0.3, 0.3]:
-		_part(Vector3(0.06, height, 0.06), Vector3(x, height / 2.0, 0.0), material)
+		parts.append([LowPoly.prism(6, 0.035, 0.035, height), LowPoly.at(Vector3(x, height / 2.0, 0.0), Vector3(0, 30, 0))])
+		parts.append([LowPoly.chamfer_box(Vector3(0.1, 0.04, 0.1), 0.012), LowPoly.at(Vector3(x, 0.02, 0.0))])
 	var rung := 0.35
 	while rung < height:
-		_part(Vector3(0.6, 0.05, 0.05), Vector3(0.0, rung, 0.0), material)
+		parts.append([LowPoly.prism(6, 0.025, 0.025, 0.6), LowPoly.at(Vector3(0.0, rung, 0.0), Vector3(0, 0, 90))])
 		rung += 0.4
-
-
-func _part(size: Vector3, pos: Vector3, material: Material) -> void:
 	var mesh_instance := MeshInstance3D.new()
-	var box := BoxMesh.new()
-	box.size = size
-	mesh_instance.mesh = box
+	mesh_instance.mesh = LootShapes.with_uvs(LowPoly.merge(parts), 2.0)
 	mesh_instance.material_override = material
-	mesh_instance.position = pos
 	add_child(mesh_instance)

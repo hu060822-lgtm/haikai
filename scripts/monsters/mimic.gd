@@ -181,12 +181,31 @@ func _build_bug() -> void:
 	add_child(_bug)
 	var shell := PS1Materials.get_material("rust_metal", Color(0.75, 0.95, 0.55), true)
 	var leg := PS1Materials.get_material("concrete", Color(0.35, 0.3, 0.25), true)
-	MonsterKit.sphere(_bug, 0.2, Vector3(0, 0.08, 0), shell, Vector3(1.0, 0.5, 1.4))
-	MonsterKit.sphere(_bug, 0.08, Vector3(0, 0.09, -0.3), leg)
+	var belly := PS1Materials.get_material("concrete", Color(0.5, 0.55, 0.35), true)
+	var eye := PS1Materials.get_material("concrete", Color(0.2, 0.3, 0.05), true, Vector2.ONE, Color(0.35, 0.6, 0.1))
+	# A domed, faceted carapace split down the middle into two wing cases, over a flat belly.
+	var dome := PackedVector2Array([Vector2(0.0, 0.0), Vector2(0.2, 0.0), Vector2(0.21, 0.03), Vector2(0.18, 0.09),
+		Vector2(0.12, 0.15), Vector2(0.0, 0.17)])
+	for side in [-1.0, 1.0]:
+		MonsterKit.part(_bug, _uv(LowPoly.lathe(dome, 8)), Vector3(0.095 * side, 0.03, 0.02), shell, Vector3(0, 22.5, 0), Vector3(0.52, 0.8, 1.4))
+	MonsterKit.part(_bug, _uv(LowPoly.lathe(PackedVector2Array([Vector2(0, 0), Vector2(0.18, 0), Vector2(0.19, 0.04), Vector2(0, 0.05)]), 8)),
+		Vector3(0, 0.0, 0.0), belly, Vector3(0, 22.5, 0), Vector3(1.0, 1.0, 1.35))
+	# Head with a pair of hooked mandibles and long feelers.
+	MonsterKit.part(_bug, _uv(LowPoly.blob(0.08, Vector3(1.1, 0.8, 1.0), 1, 0.08, 7)), Vector3(0, 0.09, -0.3), leg)
+	for side in [-1.0, 1.0]:
+		MonsterKit.part(_bug, LowPoly.blob(0.026, Vector3.ONE, 0), Vector3(0.05 * side, 0.12, -0.35), eye)
+		var mandible := PackedVector3Array([Vector3(0.04 * side, 0.06, -0.36), Vector3(0.05 * side, 0.05, -0.42), Vector3(0.0, 0.04, -0.45)])
+		MonsterKit.part(_bug, LowPoly.tube(mandible, PackedFloat32Array([0.018, 0.012, 0.0]), 4), Vector3.ZERO, leg)
+		var feeler := PackedVector3Array([Vector3(0.03 * side, 0.14, -0.35), Vector3(0.1 * side, 0.22, -0.45), Vector3(0.2 * side, 0.2, -0.55)])
+		MonsterKit.part(_bug, LowPoly.tube(feeler, PackedFloat32Array([0.008, 0.005, 0.0]), 3), Vector3.ZERO, leg)
+	# Three pairs of jointed legs: up to a knee, then down to a pointed foot.
 	for i in 3:
 		for side in [-1.0, 1.0]:
-			var leg_part := MonsterKit.box(_bug, Vector3(0.26, 0.025, 0.025), Vector3(0.17 * side, 0.03, -0.12 + i * 0.12), leg)
-			leg_part.rotation.y = 0.4 * side * (i - 1)
+			var z := -0.12 + i * 0.12
+			var splay := 0.4 * (i - 1)
+			var path := PackedVector3Array([Vector3(0.14 * side, 0.05, z), Vector3(0.27 * side, 0.12, z + splay * 0.12),
+				Vector3(0.36 * side, -0.02, z + splay * 0.25)])
+			MonsterKit.part(_bug, LowPoly.tube(path, PackedFloat32Array([0.018, 0.014, 0.0]), 4), Vector3.ZERO, leg)
 	# Beady eyes that catch the lantern light.
 	var eyes := OmniLight3D.new()
 	eyes.light_color = Color(0.7, 1.0, 0.4)
@@ -194,3 +213,7 @@ func _build_bug() -> void:
 	eyes.omni_range = 0.7
 	eyes.position = Vector3(0, 0.15, -0.35)
 	_bug.add_child(eyes)
+
+
+static func _uv(mesh: Mesh) -> Mesh:
+	return LootShapes.with_uvs(mesh, 5.0)

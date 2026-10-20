@@ -16,15 +16,16 @@ func _ready() -> void:
 	contact_monitor = true
 	max_contacts_reported = 1
 	body_entered.connect(_on_body_entered)
+	# A faceted glass marble (a split icosahedron) with a coloured swirl band.
 	var mesh_instance := MeshInstance3D.new()
-	var sphere := SphereMesh.new()
-	sphere.radius = 0.04
-	sphere.height = 0.08
-	sphere.radial_segments = 6
-	sphere.rings = 3
-	mesh_instance.mesh = sphere
+	mesh_instance.mesh = LootShapes.with_uvs(LowPoly.blob(0.04, Vector3.ONE, 1), 12.0)
 	mesh_instance.material_override = PS1Materials.get_material("brass", Color(0.6, 0.9, 1.0), true)
 	add_child(mesh_instance)
+	var swirl := MeshInstance3D.new()
+	swirl.mesh = LowPoly.prism(8, 0.041, 0.041, 0.012)
+	swirl.rotation = Vector3(0.6, 0.0, 0.9)
+	swirl.material_override = PS1Materials.get_material("concrete", Color(0.15, 0.4, 0.9), true)
+	mesh_instance.add_child(swirl)
 	var collider := CollisionShape3D.new()
 	var shape := SphereShape3D.new()
 	shape.radius = 0.04

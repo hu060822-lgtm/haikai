@@ -260,20 +260,41 @@ func _build_model() -> void:
 	var shirt := PS1Materials.get_material("carpet", Color(0.9, 0.75, 0.3), true)
 	var skin := PS1Materials.get_material("concrete", Color(0.95, 0.85, 0.78), true)
 	var dark := PS1Materials.get_material("concrete", Color(0.05, 0.05, 0.05), true)
-	MonsterKit.box(_model, Vector3(0.3, 0.4, 0.18), Vector3(0, 0.65, 0), shirt)
+	# A smock-like shirt, wider at the hem, with a round collar.
+	var smock := PackedVector2Array([Vector2(0.0, -0.2), Vector2(0.17, -0.2), Vector2(0.15, -0.1),
+		Vector2(0.13, 0.08), Vector2(0.15, 0.15), Vector2(0.09, 0.2), Vector2(0.0, 0.21)])
+	MonsterKit.part(_model, _uv(LowPoly.lathe(smock, 7)), Vector3(0, 0.65, 0), shirt, Vector3.ZERO, Vector3(1.0, 1.0, 0.62))
+	MonsterKit.part(_model, _uv(LowPoly.prism(7, 0.07, 0.06, 0.05)), Vector3(0, 0.87, 0), skin)
 	for side in [-1.0, 1.0]:
-		MonsterKit.limb(_model, Vector3(0.08 * side, 0.45, 0), Vector3(0.09, 0.45, 0.09), dark)
-		MonsterKit.limb(_model, Vector3(0.19 * side, 0.82, 0), Vector3(0.07, 0.38, 0.07), skin)
-	MonsterKit.sphere(_model, 0.14, Vector3(0, 1.0, 0), skin)
+		# Thin dark legs ending in little shoes, and bare skinny arms.
+		var leg := MonsterKit.taper_limb(_model, Vector3(0.07 * side, 0.47, 0), 0.43, 0.05, 0.035, dark, 5)
+		MonsterKit.part(leg, _uv(LowPoly.chamfer_box(Vector3(0.08, 0.06, 0.13), 0.02)), Vector3(0, -0.43, -0.02), dark)
+		var arm := MonsterKit.taper_limb(_model, Vector3(0.17 * side, 0.82, 0), 0.34, 0.035, 0.025, skin, 5)
+		arm.rotation.z = 0.12 * side
+		MonsterKit.part(arm, _uv(LowPoly.blob(0.035, Vector3(0.8, 1.0, 0.8), 0)), Vector3(0, -0.36, 0), skin)
+		# Shoulder puffs of the shirt.
+		MonsterKit.part(_model, _uv(LowPoly.blob(0.055, Vector3.ONE, 0)), Vector3(0.14 * side, 0.82, 0), shirt)
+	# A big round head, slightly too big for the body.
+	var head := PackedVector2Array([Vector2(0.0, -0.13), Vector2(0.08, -0.12), Vector2(0.13, -0.05),
+		Vector2(0.145, 0.03), Vector2(0.12, 0.1), Vector2(0.06, 0.14), Vector2(0.0, 0.15)])
+	MonsterKit.part(_model, _uv(LowPoly.lathe(head, 8)), Vector3(0, 1.02, 0), skin, Vector3(0, 22.5, 0))
 	# Two black eyes, too big, and nothing else.
 	for side in [-1.0, 1.0]:
-		MonsterKit.sphere(_model, 0.035, Vector3(0.05 * side, 1.02, -0.12), dark)
-	# The toy it always hides next to.
+		MonsterKit.part(_model, LowPoly.blob(0.04, Vector3(0.9, 1.15, 0.5), 0), Vector3(0.052 * side, 1.03, -0.12), dark)
+	# The toy it always hides next to: a stack of wooden blocks and a ball.
 	_toy = Node3D.new()
 	_toy.position = Vector3(0.5, 0, 0.2)
 	add_child(_toy)
 	var red := PS1Materials.get_material("concrete", Color(0.9, 0.2, 0.15), true)
 	var blue := PS1Materials.get_material("concrete", Color(0.2, 0.4, 0.9), true)
-	MonsterKit.box(_toy, Vector3(0.2, 0.2, 0.2), Vector3(0, 0.1, 0), red)
-	MonsterKit.box(_toy, Vector3(0.16, 0.16, 0.16), Vector3(0, 0.28, 0), blue)
-	MonsterKit.sphere(_toy, 0.08, Vector3(0.18, 0.08, 0.05), blue)
+	var yellow := PS1Materials.get_material("concrete", Color(0.95, 0.8, 0.2), true)
+	MonsterKit.part(_toy, _uv(LowPoly.chamfer_box(Vector3(0.2, 0.2, 0.2), 0.025)), Vector3(0, 0.1, 0), red)
+	MonsterKit.part(_toy, _uv(LowPoly.chamfer_box(Vector3(0.16, 0.16, 0.16), 0.02)), Vector3(0, 0.28, 0), blue, Vector3(0, 20, 0))
+	MonsterKit.part(_toy, _uv(LowPoly.prism(3, 0.08, 0.08, 0.1)), Vector3(0.01, 0.4, 0), yellow, Vector3(90, 30, 0))
+	MonsterKit.part(_toy, _uv(LowPoly.blob(0.08, Vector3.ONE, 1)), Vector3(0.18, 0.08, 0.05), blue)
+	# The ball's stripe.
+	MonsterKit.part(_toy, _uv(LowPoly.prism(10, 0.083, 0.083, 0.03)), Vector3(0.18, 0.08, 0.05), yellow, Vector3(0, 0, 70))
+
+
+static func _uv(mesh: Mesh) -> Mesh:
+	return LootShapes.with_uvs(mesh, 4.0)

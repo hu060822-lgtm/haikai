@@ -71,6 +71,7 @@ func build() -> void:
 	bounds = AABB(Vector3(-29.5, -0.5, -29.5), Vector3(59, 9, 59))
 	overview_height = 14.0
 	_env = _environment(Color(0.5, 0.53, 0.59), Color(0.5, 0.55, 0.65), 0.35, Color(0.55, 0.58, 0.64), FOG_OUTSIDE, "drone", -20.0)
+	_plan_wings()
 	_build_ground()
 	_build_main_hut()
 	_build_lab()
@@ -79,6 +80,7 @@ func build() -> void:
 	_build_radio_hut()
 	_build_yard()
 	_build_weather()
+	_build_wings()
 
 
 func _process(delta: float) -> void:
@@ -195,12 +197,116 @@ func _heater(pos: Vector3) -> void:
 	_heaters.append(pos)
 
 
+## Open snowfields through gaps in the cliffs on every side, dotted with huts, camps,
+## wrecks and rocks. Out there it is always cold; only some of the huts have a stove.
+func _plan_wings() -> void:
+	var theme := {"floor": "snow", "floor_tint": Color.WHITE, "wall": "snow", "wall_tint": Color(0.7, 0.78, 0.85),
+		"wall_thickness": 1.0, "density": 2.0}
+	var kits := [
+		{"name": "hut", "weight": 2.0, "build": _kit_hut}, {"name": "rocks", "weight": 1.5, "build": _kit_rocks},
+		{"name": "pines", "weight": 2.0, "build": _kit_pines}, {"name": "wreck", "weight": 1.0, "build": _kit_wreck},
+		{"name": "camp", "weight": 1.0, "build": _kit_camp}, {"name": "mast", "weight": 0.7, "build": _kit_mast, "max_count": 2},
+		{"name": "cache", "weight": 1.0, "build": _kit_cache, "deep": true, "min_depth": 2},
+	]
+	for spec in [["west", Vector3(-79, 0, -24), Vector2i(1, 0), Vector2i(2, 1)], ["east", Vector3(31, 0, -24), Vector2i(-1, 0), Vector2i(0, 1)],
+			["north", Vector3(-24, 0, -79), Vector2i(0, 1), Vector2i(1, 2)], ["south", Vector3(-24, 0, 31), Vector2i(0, -1), Vector2i(1, 0)]]:
+		var grid := RoomGrid.new()
+		grid.name = spec[0]
+		grid.origin = spec[1]
+		grid.cell = 16.0
+		grid.cols = 3
+		grid.rows = 3
+		grid.height = 8.0
+		grid.core_side = spec[2]
+		grid.ports.assign([spec[3]])
+		grid.open_plan = true
+		grid.roofed = false
+		grid.theme = theme
+		grid.kits = kits
+		_plan_wing(grid)
+
+
+func _kit_hut(grid: RoomGrid, room: Dictionary) -> void:
+	var sx := 1.0 if grid.rng.randf() < 0.5 else -1.0
+	var sz := 1.0 if grid.rng.randf() < 0.5 else -1.0
+	var centre: Vector3 = room.center + Vector3(sx * 4.6, 0, sz * 4.6)
+	var half := Vector2(3.0, 2.5)
+	var lo := Vector2(centre.x - half.x, centre.z - half.y)
+	var hi := Vector2(centre.x + half.x, centre.z + half.y)
+	# The door faces the middle of the field.
+	_hut(lo, hi, 3.2, [["west" if sx > 0 else "east", half.y, 1.4, 2.3]])
+	var heated := grid.rng.randf() < 0.5
+	if heated:
+		_heater(centre + Vector3(sx * (half.x - 0.7), 0, -sz * (half.y - 0.6)))
+	Props.bed(self, centre + Vector3(sx * 0.6, 0, sz * (half.y - 1.1)), 90.0, Vector3(0.9, 0.5, 1.9), Color(0.55, 0.5, 0.45))
+	grid.add_loot(room, centre + Vector3(sx * 0.6, 0.75, sz * (half.y - 1.1)))
+	grid.add_loot(room, centre + Vector3(-sx * 1.2, 0.2, -sz * 0.8))
+	if grid.rng.randf() < 0.3:
+		_add_locker(centre + Vector3(sx * (half.x - 0.45), 0, sz * 0.2), -PI / 2.0 * sx)
+
+
+func _kit_rocks(grid: RoomGrid, room: Dictionary) -> void:
+	for pos in grid.floor_spots(room, grid.rng.randi_range(4, 7), 2.0, 4.6):
+		Props.rock(self, pos, grid.rng.randf_range(0.6, 2.2), grid.rng.randi(), Color(0.7, 0.75, 0.82), "snow")
+	for pos in grid.floor_spots(room, 1):
+		grid.add_loot(room, pos + Vector3(0, 0.2, 0))
+
+
+func _kit_pines(grid: RoomGrid, room: Dictionary) -> void:
+	for pos in grid.floor_spots(room, grid.rng.randi_range(5, 9), 1.5, 4.0):
+		Props.pine(self, pos, grid.rng.randf_range(4.0, 7.5), grid.rng.randi())
+	for pos in grid.floor_spots(room, 1):
+		grid.add_loot(room, pos + Vector3(0, 0.2, 0))
+
+
+func _kit_wreck(grid: RoomGrid, room: Dictionary) -> void:
+	var spots := grid.floor_spots(room, 3, 3.0, 4.6)
+	if spots.is_empty():
+		return
+	Props.car(self, spots[0], grid.rng.randf_range(0, 180), Color(0.75, 0.35, 0.12), true)
+	grid.add_loot(room, spots[0] + Vector3(0, 1.6, 0))
+	if spots.size() > 1:
+		Props.fuel_drums(self, spots[1], grid.rng.randi())
+	if spots.size() > 2:
+		grid.add_loot(room, spots[2] + Vector3(0, 0.2, 0))
+
+
+func _kit_camp(grid: RoomGrid, room: Dictionary) -> void:
+	var spots := grid.floor_spots(room, 4, 2.5, 4.2)
+	for i in spots.size():
+		match i:
+			0: Props.tent(self, spots[i], grid.rng.randf_range(0, 180))
+			1: Props.crate(self, spots[i], grid.rng.randf_range(0, 90), Vector3(1.0, 0.8, 0.8), Color(0.45, 0.5, 0.4))
+			_: grid.add_loot(room, spots[i] + Vector3(0, 0.2, 0))
+
+
+func _kit_mast(grid: RoomGrid, room: Dictionary) -> void:
+	var spots := grid.floor_spots(room, 3, 3.0, 4.2)
+	if spots.is_empty():
+		return
+	Props.radio_mast(self, spots[0], 12.0)
+	for pos in spots.slice(1):
+		grid.add_loot(room, pos + Vector3(0, 0.2, 0))
+
+
+func _kit_cache(grid: RoomGrid, room: Dictionary) -> void:
+	var spots := grid.floor_spots(room, 4, 2.5)
+	for i in spots.size():
+		if i == 0:
+			_add_locker(spots[i], grid.rng.randf_range(0, TAU))
+		else:
+			Props.crate(self, spots[i], grid.rng.randf_range(0, 90), Vector3(1.0, 0.8, 0.8), Color(0.5, 0.45, 0.35))
+			grid.add_loot(room, spots[i] + Vector3(0, 1.0, 0), 0.6)
+
+
 func _build_ground() -> void:
 	_box(Vector3(60, 1, 60), Vector3(0, -0.5, 0), "snow", Vector3.ZERO, Layers.WORLD, Color.WHITE, 2.0)
-	# Ice cliffs all the way round.
-	for spec in [[Vector3(60, 8, 1), Vector3(0, 4, -30.5)], [Vector3(60, 8, 1), Vector3(0, 4, 30.5)],
-			[Vector3(1, 8, 60), Vector3(-30.5, 4, 0)], [Vector3(1, 8, 60), Vector3(30.5, 4, 0)]]:
-		_box(spec[0], spec[1], "snow", Vector3.ZERO, Layers.WORLD, Color(0.7, 0.78, 0.85))
+	# Ice cliffs all the way round, with gaps out to the snowfields.
+	var cliff := Color(0.7, 0.78, 0.85)
+	_wall_with_ports(Vector3(-31, 0, -30.5), Vector3(31, 0, -30.5), 8.0, "snow", 1.0, cliff)
+	_wall_with_ports(Vector3(-31, 0, 30.5), Vector3(31, 0, 30.5), 8.0, "snow", 1.0, cliff)
+	_wall_with_ports(Vector3(-30.5, 0, -30), Vector3(-30.5, 0, 30), 8.0, "snow", 1.0, cliff)
+	_wall_with_ports(Vector3(30.5, 0, -30), Vector3(30.5, 0, 30), 8.0, "snow", 1.0, cliff)
 	for spec in [[Vector3(-28, 1.5, -10), 20.0, 5.0], [Vector3(28, 2.0, 8), -15.0, 7.0], [Vector3(-8, 1.2, -29), 5.0, 9.0],
 			[Vector3(12, 1.6, 29), -8.0, 8.0], [Vector3(-29, 1.8, 26), 40.0, 6.0], [Vector3(29, 1.4, -26), 30.0, 6.0]]:
 		_box(Vector3(spec[2], spec[0].y * 2.0, 3.0), Vector3(spec[0].x, spec[0].y, spec[0].z), "snow",

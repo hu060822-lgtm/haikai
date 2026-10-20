@@ -362,24 +362,70 @@ func _footstep() -> void:
 func _build_model() -> void:
 	_model = Node3D.new()
 	add_child(_model)
-	var iron := PS1Materials.get_material("rust_metal", Color(0.85, 0.8, 0.75), true)
-	var dark := PS1Materials.get_material("rust_metal", Color(0.45, 0.4, 0.38), true)
-	var copper := PS1Materials.get_material("pipe", Color.WHITE, true)
-
-	# Boiler torso and furnace head.
-	_cylinder(_model, 0.95, 2.0, Vector3(0, 2.6, 0), iron)
-	_box(_model, Vector3(2.1, 0.3, 1.4), Vector3(0, 3.55, 0), dark)
-	_box(_model, Vector3(1.0, 0.8, 0.9), Vector3(0, 4.05, 0), dark)
-	_cylinder(_model, 0.18, 0.9, Vector3(0.25, 4.6, 0.3), copper)
-	_cylinder(_model, 0.25, 1.6, Vector3(0, 2.6, 0.95), copper)
+	var iron := PS1Materials.get_material("rust_metal", Color(0.85, 0.8, 0.75))
+	var dark := PS1Materials.get_material("rust_metal", Color(0.45, 0.4, 0.38))
+	var copper := PS1Materials.get_material("pipe", Color.WHITE)
+	var brass := PS1Materials.get_material("brass", Color(0.8, 0.7, 0.5))
+	var fire := PS1Materials.get_material("grate", Color(0.3, 0.12, 0.05), false, Vector2.ONE, Color(0.75, 0.22, 0.03))
 
 	_eye_material = ShaderMaterial.new()
 	_eye_material.shader = PS1Materials.SHADER
 	_eye_material.set_shader_parameter("albedo_texture", load("res://textures/brass.png"))
 	_eye_material.set_shader_parameter("albedo_color", Color(0.2, 0.1, 0.0))
-	_eye_material.set_shader_parameter("use_mesh_uv", true)
+	_eye_material.set_shader_parameter("use_mesh_uv", false)
 	_eye_material.set_shader_parameter("emission_color", Color(1.0, 0.45, 0.05))
-	_box(_model, Vector3(0.7, 0.12, 0.05), Vector3(0, 4.1, -0.47), _eye_material)
+
+	# Pelvis: a heavy riveted gearbox the legs hang from.
+	MonsterKit.part(_model, LowPoly.chamfer_box(Vector3(1.35, 0.5, 0.95), 0.12), Vector3(0, 1.75, 0), dark)
+	MonsterKit.part(_model, LowPoly.prism(6, 0.22, 0.22, 1.5), Vector3(0, 1.65, 0), iron, Vector3(0, 0, 90))
+
+	# Boiler torso: a riveted drum with domed ends, banded with iron hoops.
+	var drum := PackedVector2Array([Vector2(0.0, 1.7), Vector2(0.62, 1.74), Vector2(0.9, 1.92),
+		Vector2(0.98, 2.2), Vector2(0.98, 3.05), Vector2(0.9, 3.32), Vector2(0.6, 3.46), Vector2(0.0, 3.5)])
+	MonsterKit.part(_model, LowPoly.lathe(drum, 8), Vector3.ZERO, iron, Vector3(0, 22.5, 0))
+	var hoops := []
+	for y in [2.15, 2.65, 3.1]:
+		hoops.append([LowPoly.prism(8, 1.03, 1.03, 0.12, false), LowPoly.at(Vector3(0, y, 0), Vector3(0, 22.5, 0))])
+		for i in (4 if y != 2.65 else 0):
+			var a := TAU * (i + 2.5) / 8.0
+			hoops.append([LowPoly.prism(3, 0.05, 0.03, 0.06),
+				LowPoly.at(Vector3(sin(a) * 1.06, y, cos(a) * 1.06), Vector3(90, rad_to_deg(a), 0))])
+	MonsterKit.part(_model, LowPoly.merge(hoops), Vector3.ZERO, dark)
+	# The firebox door in its belly, glowing through the grate.
+	MonsterKit.part(_model, LowPoly.extrude(LowPoly.arch_outline(0.66, 0.7, 4), 0.16), Vector3(0, 2.2, -0.93), dark)
+	MonsterKit.part(_model, LowPoly.extrude(LowPoly.arch_outline(0.46, 0.5, 4), 0.1), Vector3(0, 2.28, -1.0), fire)
+	var bars := []
+	for x in [-0.12, 0.0, 0.12]:
+		bars.append([LowPoly.prism(4, 0.025, 0.025, 0.5), LowPoly.at(Vector3(x, 2.5, -1.06), Vector3(0, 45, 0))])
+	bars.append([LowPoly.prism(4, 0.025, 0.025, 0.46), LowPoly.at(Vector3(0, 2.42, -1.06), Vector3(0, 0, 90))])
+	MonsterKit.part(_model, LowPoly.merge(bars), Vector3.ZERO, dark)
+	MonsterKit.part(_model, LowPoly.prism(4, 0.08, 0.08, 0.18), Vector3(0.28, 2.55, -1.04), brass, Vector3(0, 45, 0), Vector3(0.7, 1.0, 0.6))
+	# A pressure gauge and a safety valve on the chest.
+	MonsterKit.part(_model, LowPoly.prism(8, 0.17, 0.15, 0.08), Vector3(0.48, 3.0, -0.86), brass, Vector3(-90, 0, 0))
+	MonsterKit.part(_model, LowPoly.prism(4, 0.02, 0.0, 0.14), Vector3(0.5, 3.03, -0.92), dark, Vector3(0, 0, -50))
+	MonsterKit.part(_model, LowPoly.prism(6, 0.07, 0.07, 0.3), Vector3(-0.45, 3.45, -0.55), brass)
+	MonsterKit.part(_model, LowPoly.prism(6, 0.12, 0.06, 0.08), Vector3(-0.45, 3.62, -0.55), brass)
+	# The feed pipe down its back, and a smaller one wrapping the side.
+	MonsterKit.part(_model, LowPoly.tube(PackedVector3Array([Vector3(0, 4.0, 0.45), Vector3(0, 3.75, 0.95),
+		Vector3(0, 3.1, 1.12), Vector3(0, 2.2, 1.12), Vector3(0, 1.8, 0.8)]),
+		PackedFloat32Array([0.2, 0.22, 0.24, 0.24, 0.2]), 6), Vector3.ZERO, copper)
+	MonsterKit.part(_model, LowPoly.tube(PackedVector3Array([Vector3(-0.75, 3.4, -0.5), Vector3(-1.02, 2.9, -0.3),
+		Vector3(-1.05, 2.3, 0.2), Vector3(-0.7, 1.9, 0.7)]),
+		PackedFloat32Array([0.08, 0.09, 0.09, 0.08]), 4), Vector3.ZERO, copper)
+
+	# Shoulder yoke across the top of the boiler.
+	MonsterKit.part(_model, LowPoly.chamfer_box(Vector3(2.3, 0.36, 1.25), 0.12), Vector3(0, 3.58, 0), dark)
+	MonsterKit.part(_model, LowPoly.prism(6, 0.5, 0.42, 0.25), Vector3(0, 3.82, 0), iron, Vector3(0, 30, 0))
+
+	# The furnace head: a squat faceted firebox with a burning visor slit and a grille mouth.
+	var head_profile := PackedVector2Array([Vector2(0.0, 3.7), Vector2(0.52, 3.7), Vector2(0.6, 3.85),
+		Vector2(0.6, 4.2), Vector2(0.48, 4.42), Vector2(0.0, 4.5)])
+	MonsterKit.part(_model, LowPoly.lathe(head_profile, 8), Vector3.ZERO, dark, Vector3(0, 22.5, 0), Vector3(1.0, 1.0, 0.85))
+	MonsterKit.part(_model, LowPoly.chamfer_box(Vector3(0.95, 0.14, 0.3), 0.04), Vector3(0, 4.25, -0.43), iron, Vector3(-12, 0, 0))
+	MonsterKit.part(_model, LowPoly.prism(4, 0.08, 0.08, 0.12), Vector3(0, 4.1, -0.49), _eye_material, Vector3(0, 45, 0), Vector3(6.4, 1.0, 0.9))
+	MonsterKit.part(_model, LowPoly.prism(4, 0.08, 0.08, 0.2), Vector3(0, 3.86, -0.48), fire, Vector3(0, 45, 0), Vector3(4.1, 1.0, 0.9))
+	for x in [-0.15, 0.0, 0.15]:
+		MonsterKit.part(_model, LowPoly.prism(4, 0.025, 0.025, 0.24), Vector3(x, 3.86, -0.54), dark)
 	_eye_light = OmniLight3D.new()
 	_eye_light.light_color = Color(1.0, 0.5, 0.15)
 	_eye_light.light_energy = 1.5
@@ -387,18 +433,22 @@ func _build_model() -> void:
 	_eye_light.position = Vector3(0, 4.1, -0.9)
 	_model.add_child(_eye_light)
 
+	# Smokestacks: the tall one vents the steam.
+	var stack := PackedVector2Array([Vector2(0.0, -0.5), Vector2(0.2, -0.5), Vector2(0.16, 0.3),
+		Vector2(0.17, 0.38), Vector2(0.27, 0.46), Vector2(0.27, 0.56), Vector2(0.0, 0.56)])
+	MonsterKit.part(_model, LowPoly.lathe(stack, 6), Vector3(0.25, 4.6, 0.3), copper)
+	MonsterKit.part(_model, LowPoly.lathe(stack, 6), Vector3(-0.3, 4.4, 0.38), copper, Vector3.ZERO, Vector3(0.7, 0.6, 0.7))
+
 	for side in [-1.0, 1.0]:
 		var hip := Node3D.new()
 		hip.position = Vector3(0.5 * side, 1.65, 0)
 		_model.add_child(hip)
-		_box(hip, Vector3(0.5, 1.65, 0.5), Vector3(0, -0.82, 0), dark)
-		_box(hip, Vector3(0.7, 0.2, 0.9), Vector3(0, -1.6, -0.15), iron)
+		_build_leg(hip, side, iron, dark, copper)
 		_legs.append(hip)
 		var shoulder := Node3D.new()
 		shoulder.position = Vector3(1.2 * side, 3.35, 0)
 		_model.add_child(shoulder)
-		_box(shoulder, Vector3(0.4, 2.3, 0.4), Vector3(0, -1.15, 0), iron)
-		_box(shoulder, Vector3(0.6, 0.5, 0.6), Vector3(0, -2.45, 0), dark)
+		_build_arm(shoulder, side, iron, dark, copper)
 		_arms.append(shoulder)
 
 	_steam = CPUParticles3D.new()
@@ -426,24 +476,41 @@ func _build_model() -> void:
 	_model.add_child(_steam)
 
 
-func _box(parent: Node3D, size: Vector3, pos: Vector3, material: Material) -> void:
-	var mesh_instance := MeshInstance3D.new()
-	var box := BoxMesh.new()
-	box.size = size
-	mesh_instance.mesh = box
-	mesh_instance.material_override = material
-	mesh_instance.position = pos
-	parent.add_child(mesh_instance)
+## A piston leg hanging from its hip pivot: thigh, knee joint, hydraulic shin, clawed foot.
+func _build_leg(hip: Node3D, _side: float, iron: Material, dark: Material, copper: Material) -> void:
+	MonsterKit.part(hip, LowPoly.prism(6, 0.26, 0.26, 0.4), Vector3.ZERO, dark, Vector3(0, 0, 90))
+	MonsterKit.part(hip, LowPoly.prism(6, 0.22, 0.3, 0.75), Vector3(0, -0.45, 0), iron, Vector3(0, 30, 0))
+	MonsterKit.part(hip, LowPoly.prism(6, 0.21, 0.21, 0.5), Vector3(0, -0.88, 0), dark, Vector3(0, 0, 90))
+	MonsterKit.part(hip, LowPoly.prism(6, 0.3, 0.2, 0.6), Vector3(0, -1.22, 0), iron, Vector3(0, 30, 0))
+	# Hydraulic ram down the front of the shin.
+	MonsterKit.part(hip, LowPoly.prism(4, 0.07, 0.07, 0.5), Vector3(0, -0.85, -0.25), copper)
+	MonsterKit.part(hip, LowPoly.prism(4, 0.04, 0.04, 0.4), Vector3(0, -1.25, -0.25), dark)
+	# The foot: a stamped iron wedge with three blunt toes.
+	var foot := PackedVector2Array([Vector2(-0.35, 0.0), Vector2(0.55, 0.0), Vector2(0.62, 0.08),
+		Vector2(0.4, 0.24), Vector2(0.0, 0.32), Vector2(-0.35, 0.24)])
+	MonsterKit.part(hip, LowPoly.extrude(foot, 0.62), Vector3(0, -1.65, -0.05), dark, Vector3(0, 90, 0))
+	for x in [-0.2, 0.0, 0.2]:
+		MonsterKit.part(hip, LowPoly.prism(4, 0.08, 0.0, 0.28), Vector3(x, -1.6, -0.72), iron, Vector3(-80, 45, 0))
 
 
-func _cylinder(parent: Node3D, radius: float, height: float, pos: Vector3, material: Material) -> void:
-	var mesh_instance := MeshInstance3D.new()
-	var cylinder := CylinderMesh.new()
-	cylinder.top_radius = radius
-	cylinder.bottom_radius = radius
-	cylinder.height = height
-	cylinder.radial_segments = 8
-	mesh_instance.mesh = cylinder
-	mesh_instance.material_override = material
-	mesh_instance.position = pos
-	parent.add_child(mesh_instance)
+## An arm hanging from its shoulder pivot: domed pauldron, piston elbow, crushing claw.
+func _build_arm(shoulder: Node3D, side: float, iron: Material, dark: Material, copper: Material) -> void:
+	var dome := PackedVector2Array([Vector2(0.0, -0.3), Vector2(0.44, -0.3), Vector2(0.46, -0.05),
+		Vector2(0.34, 0.18), Vector2(0.0, 0.26)])
+	MonsterKit.part(shoulder, LowPoly.lathe(dome, 7), Vector3(0.05 * side, 0.05, 0), iron)
+	MonsterKit.part(shoulder, LowPoly.prism(6, 0.2, 0.24, 1.0), Vector3(0, -0.75, 0), dark, Vector3(0, 30, 0))
+	MonsterKit.part(shoulder, LowPoly.prism(6, 0.22, 0.22, 0.46), Vector3(0, -1.3, 0), iron, Vector3(0, 0, 90))
+	MonsterKit.part(shoulder, LowPoly.prism(6, 0.32, 0.22, 0.85), Vector3(0, -1.78, 0), iron, Vector3(0, 30, 0))
+	MonsterKit.part(shoulder, LowPoly.tube(PackedVector3Array([Vector3(0.0, -0.3, 0.28), Vector3(0.0, -1.1, 0.32),
+		Vector3(0.0, -1.5, 0.34), Vector3(0.0, -2.05, 0.3)]),
+		PackedFloat32Array([0.06, 0.06, 0.06, 0.06]), 4), Vector3.ZERO, copper)
+	# The hand: a riveted block with three hooked iron fingers.
+	MonsterKit.part(shoulder, LowPoly.chamfer_box(Vector3(0.55, 0.42, 0.55), 0.1), Vector3(0, -2.38, 0), dark)
+	for i in 3:
+		var a := (i - 1) * 0.45
+		var base := Vector3(sin(a) * 0.18, -2.55, -cos(a) * 0.18)
+		MonsterKit.part(shoulder, LowPoly.tube(PackedVector3Array([base, base + Vector3(sin(a) * 0.1, -0.25, -cos(a) * 0.12),
+			base + Vector3(sin(a) * 0.06, -0.45, cos(a) * 0.02)]),
+			PackedFloat32Array([0.08, 0.06, 0.0]), 4), Vector3.ZERO, iron)
+	MonsterKit.part(shoulder, LowPoly.tube(PackedVector3Array([Vector3(0, -2.55, 0.18), Vector3(0, -2.78, 0.26),
+		Vector3(0, -2.95, 0.12)]), PackedFloat32Array([0.08, 0.06, 0.0]), 4), Vector3.ZERO, iron)
