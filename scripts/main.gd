@@ -53,10 +53,24 @@ func _ready() -> void:
 	session.disconnected.connect(func(reason: String) -> void: show_loadout(reason))
 	get_viewport().size_changed.connect(_update_resolution)
 	if show_menus:
-		show_loadout()
+		show_title()
 
 
 # --- Menus ----------------------------------------------------------------------------
+
+## The punk title card shown at launch; everything else goes through the stash.
+func show_title() -> void:
+	_clear_run()
+	if session.is_online():
+		session.leave()
+	var screen := TitleScreen.new()
+	screen.start_requested.connect(func() -> void: show_loadout())
+	screen.multiplayer_requested.connect(func() -> void:
+		show_loadout()
+		(_menu as LoadoutScreen).focus_multiplayer())
+	screen.quit_requested.connect(func() -> void: get_tree().quit())
+	_set_menu(screen)
+
 
 func show_loadout(status := "") -> void:
 	_clear_run()
@@ -66,6 +80,7 @@ func show_loadout(status := "") -> void:
 	screen.solo_requested.connect(func() -> void: start_run(GameState.consume_equipped()))
 	screen.host_requested.connect(_host)
 	screen.join_requested.connect(_join)
+	screen.back_requested.connect(show_title)
 	_set_menu(screen)
 	if status != "":
 		screen.show_status(status)

@@ -68,11 +68,15 @@ func _run() -> void:
 		# A few rooms from the random wings, seen from their clear centres.
 		var shown := 0
 		for grid in main.level.wings:
-			for room in grid.rooms:
-				if shown >= 4 or not room.wide or room.get("kit", "") == "":
+			var by_size: Array = grid.rooms.duplicate()
+			by_size.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+				return (a.max - a.min).length() > (b.max - b.min).length())
+			var seen_kits := {}
+			for room in by_size:
+				if shown >= 6 or not room.wide or room.get("kit", "") == "" or seen_kits.has(room.kit):
 					continue
-				var c: Vector2i = room.cells[0]
-				var centre: Vector3 = grid._cell_centre(c)
+				seen_kits[room.kit] = true
+				var centre: Vector3 = room.clear_points[0]
 				var corner := Vector3(room.min.x if centre.x - room.min.x > room.max.x - centre.x else room.max.x, 0,
 					room.min.y if centre.z - room.min.y > room.max.y - centre.z else room.max.y)
 				var to := corner - centre

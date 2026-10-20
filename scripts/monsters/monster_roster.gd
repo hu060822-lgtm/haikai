@@ -17,8 +17,8 @@ const MONSTERS := {
 	"tuner": {"name": "調音師", "size": "medium", "count": [1, 1]},
 	"child": {"name": "捉迷藏的孩子", "size": "small", "count": [1, 1]},
 }
-const MIN_KINDS := 2
-const MAX_KINDS := 4
+const MIN_KINDS := 3  # the maps are big: a few more things roam them
+const MAX_KINDS := 5
 const MAX_LARGE := 1
 
 

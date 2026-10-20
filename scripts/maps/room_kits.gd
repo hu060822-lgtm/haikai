@@ -13,14 +13,14 @@ static func kit(kit_name: String, weight := 1.0, extra := {}) -> Dictionary:
 
 static func storage(grid: RoomGrid, room: Dictionary) -> void:
 	var slots := grid.wall_slots(room, 0.45)
-	for i in mini(slots.size(), 3 + room.cells.size() * 2):
+	for i in mini(slots.size(), 3 + grid.units(room) * 2):
 		var slot: Dictionary = slots[i]
 		Props.shelf(grid.map, slot.pos, slot.yaw, 2.0, 2.2)
 		if i % 2 == 0:
 			for spot in Props.shelf_spots(slot.pos, slot.yaw):
 				grid.add_loot(room, spot)
 				break
-	for pos in grid.floor_spots(room, 2 + room.cells.size()):
+	for pos in grid.floor_spots(room, 2 + grid.units(room)):
 		var roll := grid.rng.randi_range(0, 2)
 		if roll == 0:
 			Props.crate(grid.map, pos, grid.rng.randf_range(0, 90))
@@ -32,11 +32,11 @@ static func storage(grid: RoomGrid, room: Dictionary) -> void:
 
 
 static func pump_room(grid: RoomGrid, room: Dictionary) -> void:
-	var spots := grid.floor_spots(room, 1 + room.cells.size(), 2.4)
+	var spots := grid.floor_spots(room, 1 + grid.units(room), 2.4)
 	for pos in spots:
 		Props.tank(grid.map, pos, grid.rng.randf_range(0.9, 1.4), grid.rng.randf_range(2.4, 3.6))
 		grid.add_loot(room, pos + Vector3(1.8, 0.2, 0.4))
-	var y := grid.height - 0.8
+	var y: float = room.height - 0.8
 	Props.pipe_bundle(grid.map, Vector3(room.min.x + 0.6, y, room.min.y + 0.6), Vector3(room.max.x - 0.6, y, room.min.y + 0.6), 3, 0.14)
 	Props.pipe_bundle(grid.map, Vector3(room.min.x + 0.6, y - 0.9, room.max.y - 0.6), Vector3(room.max.x - 0.6, y - 0.9, room.max.y - 0.6), 2, 0.2)
 	var slots := grid.wall_slots(room)
@@ -46,7 +46,7 @@ static func pump_room(grid: RoomGrid, room: Dictionary) -> void:
 
 static func workshop(grid: RoomGrid, room: Dictionary) -> void:
 	var slots := grid.wall_slots(room, 0.6, 3.0)
-	for i in mini(slots.size(), 2 + room.cells.size()):
+	for i in mini(slots.size(), 2 + grid.units(room)):
 		var slot: Dictionary = slots[i]
 		if i % 3 == 2:
 			Props.machine(grid.map, slot.pos, slot.yaw)
@@ -73,7 +73,7 @@ static func locker_room(grid: RoomGrid, room: Dictionary) -> void:
 
 
 static func coal_bunker(grid: RoomGrid, room: Dictionary) -> void:
-	for pos in grid.floor_spots(room, 3 + room.cells.size(), 2.0):
+	for pos in grid.floor_spots(room, 3 + grid.units(room), 2.0):
 		var size := grid.rng.randf_range(0.8, 1.6)
 		Props.rock(grid.map, pos, size, grid.rng.randi(), Color(0.15, 0.14, 0.14), "concrete")
 	for pos in grid.floor_spots(room, 2):
@@ -84,7 +84,7 @@ static func coal_bunker(grid: RoomGrid, room: Dictionary) -> void:
 
 
 static func office(grid: RoomGrid, room: Dictionary) -> void:
-	var spots := grid.floor_spots(room, 2 + room.cells.size(), 2.0)
+	var spots := grid.floor_spots(room, 2 + grid.units(room), 2.0)
 	for pos in spots:
 		var yaw := grid.rng.randf_range(-20, 20) + 180.0 * grid.rng.randi_range(0, 1)
 		Props.desk(grid.map, pos, yaw)
@@ -105,7 +105,7 @@ static func boiler_annex(grid: RoomGrid, room: Dictionary) -> void:
 	grid.map._light(centre + Vector3(0, 1.0, 2.6), Color(1.0, 0.45, 0.15), 1.0, 7.0, true)
 	grid.add_loot(room, centre + Vector3(2.4, 0.2, 1.5))
 	grid.add_loot(room, centre + Vector3(-2.4, 0.2, -1.0))
-	Props.pipe_bundle(grid.map, centre + Vector3(0, 4.2, 0), centre + Vector3(0, grid.height, 0), 1, 0.4)
+	Props.pipe_bundle(grid.map, centre + Vector3(0, 4.2, 0), centre + Vector3(0, room.height, 0), 1, 0.4)
 
 
 ## The deepest room: a locked-up stash worth the walk.
@@ -121,7 +121,7 @@ static func vault(grid: RoomGrid, room: Dictionary) -> void:
 
 
 static func bare(grid: RoomGrid, room: Dictionary) -> void:
-	for pos in grid.floor_spots(room, 1 + room.cells.size()):
+	for pos in grid.floor_spots(room, 1 + grid.units(room)):
 		Props.barrel(grid.map, pos, Color(0.45, 0.3, 0.2), grid.rng.randf() < 0.4)
 	for pos in grid.floor_spots(room, 1):
 		grid.add_loot(room, pos + Vector3(0, 0.2, 0))
@@ -173,7 +173,7 @@ static func food_stall(grid: RoomGrid, room: Dictionary) -> void:
 	for i in mini(slots.size(), 2):
 		Props.counter(grid.map, slots[i].pos, slots[i].yaw, 3.0, Color(0.8, 0.6, 0.4))
 		grid.add_loot(room, slots[i].pos + Vector3(0, 1.1, 0))
-	for pos in grid.floor_spots(room, 3 + room.cells.size(), 1.8):
+	for pos in grid.floor_spots(room, 3 + grid.units(room), 1.8):
 		Props.round_table(grid.map, pos)
 		Props.chair(grid.map, pos + Vector3(0.7, 0, 0), -90.0, Color(0.8, 0.3, 0.25), grid.rng.randf() < 0.3)
 		Props.chair(grid.map, pos + Vector3(-0.7, 0, 0), 90.0, Color(0.8, 0.3, 0.25))
@@ -296,14 +296,14 @@ static func kitchen(grid: RoomGrid, room: Dictionary) -> void:
 
 static func ball_room(grid: RoomGrid, room: Dictionary) -> void:
 	var colors := [Color(1.0, 0.55, 0.6), Color(0.55, 0.8, 1.0), Color(1.0, 0.9, 0.5), Color(0.6, 1.0, 0.7)]
-	for pos in grid.floor_spots(room, 4 + room.cells.size() * 2, 1.4):
+	for pos in grid.floor_spots(room, 4 + grid.units(room) * 2, 1.4):
 		Props.giant_ball(grid.map, pos, grid.rng.randf_range(0.4, 1.1), colors[grid.rng.randi_range(0, 3)])
 	for pos in grid.floor_spots(room, 2):
 		grid.add_loot(room, pos + Vector3(0, 0.2, 0))
 
 
 static func toy_room(grid: RoomGrid, room: Dictionary) -> void:
-	for pos in grid.floor_spots(room, 2 + room.cells.size()):
+	for pos in grid.floor_spots(room, 2 + grid.units(room)):
 		Props.toy_blocks(grid.map, pos, grid.rng.randi())
 	var slots := grid.wall_slots(room)
 	if not slots.is_empty():

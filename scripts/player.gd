@@ -141,6 +141,11 @@ var _cat_eye := 0.0
 var _cat_eye_after := 0.0
 var _rewind: Array[Vector3] = []
 var _rewind_timer := 0.0
+## Traps (scripts/traps/) set these on the owner's machine: seconds held in place
+## (mash E to work free), and seconds of slowed walking at trap_slow_factor.
+var snared := 0.0
+var trap_slow := 0.0
+var trap_slow_factor := 1.0
 
 
 func _ready() -> void:
@@ -611,7 +616,7 @@ func _physics_process(delta: float) -> void:
 	elif is_crouching and _can_stand():
 		_set_crouch(false)
 
-	if input_enabled and Input.is_action_just_pressed("jump") and is_on_floor() and not is_crouching:
+	if input_enabled and Input.is_action_just_pressed("jump") and is_on_floor() and not is_crouching and snared <= 0.0:
 		var jump := JUMP_VELOCITY * _weight_factor()
 		if has_gear("spring_boots"):
 			jump *= SPRING_JUMP_MULT
@@ -636,6 +641,14 @@ func _physics_process(delta: float) -> void:
 	if _heavy_slowed():
 		speed *= HEAVY_FACTOR
 	speed *= _weight_factor()
+	if trap_slow > 0.0:
+		trap_slow -= delta
+		speed *= trap_slow_factor
+	if snared > 0.0:
+		snared = maxf(snared - delta, 0.0)
+		speed = 0.0
+		if input_enabled and Input.is_action_just_pressed("interact"):
+			snared = maxf(snared - 0.45, 0.0)
 
 	if climbing:
 		# Forward climbs, back descends; you can still step off sideways or forward at the top.

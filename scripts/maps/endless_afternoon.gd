@@ -110,8 +110,8 @@ func build() -> void:
 	# The white door can open onto any room of the wings too.
 	for grid in wings:
 		for room in grid.rooms:
-			if room.wide:
-				dream_rooms.append(room.center + Vector3(0, 0.2, 0))
+			if room.wide and room.shape != "corridor":
+				dream_rooms.append(room.clear_points[0] + Vector3(0, 0.2, 0))
 
 
 ## More of the house than there should be: rooms behind the playground, the dining room
@@ -128,27 +128,24 @@ func _plan_wings() -> void:
 		RoomKits.kit("toy_room", 1.5, {"floor": "carpet", "floor_tint": PASTEL.butter}),
 		RoomKits.kit("living", 1.5, {"floor": "wood", "floor_tint": Color(0.95, 0.88, 0.8)}),
 		RoomKits.kit("vault", 1.0, {"deep": true, "min_depth": 2}),
+		FacilityKits.kit("giant_room", 2.5, {"shape": "hall", "floor": "wood", "floor_tint": Color(0.95, 0.88, 0.8)}),
+		RoomKits.kit("ball_room", 1.0, {"shape": "hall", "floor_tint": PASTEL.mint}),
+		FacilityKits.kit("stair_room", 1.5, {"max_count": 3, "floor_tint": PASTEL.lilac}),
+		FacilityKits.kit("door_room", 1.2, {"max_count": 3, "floor_tint": PASTEL.butter}),
+		FacilityKits.kit("upside_down", 1.0, {"max_count": 2, "tidy": true, "floor": "wood", "floor_tint": Color(0.95, 0.88, 0.8)}),
+		FacilityKits.kit("dream_corridor", 1.0, {"shape": "corridor"}),
 	]
-	# [name, origin, cols x rows, core side, ports, where the house's own wall runs along that side]
-	# The side wings stop short of the looping corridor, which runs on past the house.
-	# The bedroom gets no wing: its child-sized door is what keeps big things out.
-	for spec in [["north", Vector3(-24, 0, -60), Vector2i(4, 3), Vector2i(0, 1), [Vector2i(0, 2), Vector2i(3, 2)], [Vector2(-24, -5), Vector2(5, 24)]],
-			["south", Vector3(-24, 0, 24), Vector2i(4, 3), Vector2i(0, -1), [Vector2i(3, 0)], [Vector2(-24, -5), Vector2(5, 24)]],
-			["west", Vector3(-60, 0, -38), Vector2i(3, 3), Vector2i(1, 0), [Vector2i(2, 1)], [Vector2(-24, -1.6)]],
-			["east", Vector3(24, 0, -38), Vector2i(3, 3), Vector2i(-1, 0), [Vector2i(0, 2)], [Vector2(-24, -1.6)]],
-			["pool_wing", Vector3(24, 0, 2), Vector2i(3, 3), Vector2i(-1, 0), [Vector2i(0, 0)], [Vector2(1.6, 24)]]]:
-		var grid := RoomGrid.new()
-		grid.name = spec[0]
-		grid.origin = spec[1]
-		grid.cols = spec[2].x
-		grid.rows = spec[2].y
-		grid.core_side = spec[3]
-		grid.core_spans.assign(spec[5])
-		grid.ports.assign(spec[4])
-		grid.dark_chance = 0.0
-		grid.theme = theme
-		grid.kits = kits
-		_plan_wing(grid)
+	var grid := _plan_sprawl("dream", Rect2(-24, -24, 48, 48), [
+		[Vector3(-18, 0, -24), Vector2i(0, -1)], [Vector3(18, 0, -24), Vector2i(0, -1)], [Vector3(18, 0, 24), Vector2i(0, 1)],
+		[Vector3(-24, 0, -20), Vector2i(-1, 0)], [Vector3(24, 0, -8), Vector2i(1, 0)], [Vector3(24, 0, 8), Vector2i(1, 0)],
+	], theme, kits)
+	# The looping corridor runs on past the house; nothing is built on it. The bedroom
+	# (south-west) gets no doorway: its child-sized door is what keeps big things out.
+	grid.blocked.append(Rect2(-CORRIDOR_END - 2.0, -CORRIDOR_HALF - 1.0, CORRIDOR_END * 2.0 + 4.0, CORRIDOR_HALF * 2.0 + 2.0))
+	grid.dark_chance = 0.0
+	# The house is wrong in its proportions: long white corridors, rooms of every height.
+	grid.shape_weights = {"corridor": 3.5, "room": 4.0, "hall": 1.6}
+	grid.hall_height = Vector2(7.0, 12.0)
 
 
 func _physics_process(delta: float) -> void:
