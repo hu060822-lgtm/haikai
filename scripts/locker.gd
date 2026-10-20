@@ -3,13 +3,13 @@ extends StaticBody3D
 ## A locked metal cabinet with better loot inside. Needs a crowbar, and prying it
 ## open is loud.
 
-signal opened(locker: Locker)
+## The run decides whether it opens (the host owns it), then calls play_open().
+signal interact_requested()
 
 const PRY_NOISE := 12.0
 const LUCK := 1.5
 
 var is_open := false
-var rng: RandomNumberGenerator
 var _door: Node3D
 
 
@@ -69,6 +69,11 @@ func interact(player: Player) -> void:
 
 
 func pry(_player: Player) -> void:
+	if not is_open:
+		interact_requested.emit()
+
+
+func play_open() -> void:
 	if is_open:
 		return
 	is_open = true
@@ -76,11 +81,5 @@ func pry(_player: Player) -> void:
 	var tween := create_tween()
 	tween.tween_property(_door, "rotation:y", deg_to_rad(-110.0), 0.4)
 	Sfx.play_3d(get_parent(), global_position, "clank", 4.0, 45.0, 0.8)
-	GameNoise.emit(get_tree(), global_position, PRY_NOISE, GameNoise.Kind.TOOL)
-	var r := rng if rng != null else RandomNumberGenerator.new()
-	for i in r.randi_range(1, 2):
-		var item := LootItem.from_data(LootTable.roll(r, LUCK))
-		item.freeze = true
-		get_parent().add_child(item)
-		item.global_position = to_global(Vector3(-0.2 + 0.4 * i, 0.2, 0.6))
-	opened.emit(self)
+	if multiplayer.is_server():
+		GameNoise.emit(get_tree(), global_position, PRY_NOISE, GameNoise.Kind.TOOL)

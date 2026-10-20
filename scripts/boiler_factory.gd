@@ -38,6 +38,8 @@ var extraction_zone: ExtractionZone
 var lever: BoilerLever
 var lockers: Array[Locker] = []
 var rng := RandomNumberGenerator.new()
+## Only the host needs the navmesh (monsters run there).
+var build_navigation := true
 
 var _nav: NavigationRegion3D
 var _flicker_lights: Array[OmniLight3D] = []
@@ -48,8 +50,8 @@ var _time := 0.0
 
 
 func _ready() -> void:
-	rng.randomize()
 	_nav = NavigationRegion3D.new()
+	_nav.name = "Nav"
 	add_child(_nav)
 	_build_environment()
 	_build_shell()
@@ -61,8 +63,8 @@ func _ready() -> void:
 	_build_props()
 	_build_lights()
 	_build_extraction()
-	_bake_navigation()
-	_spawn_loot()
+	if build_navigation:
+		_bake_navigation()
 
 
 func _process(delta: float) -> void:
@@ -76,8 +78,23 @@ func restart_boiler() -> void:
 	extraction_zone.powered = true
 	_flicker_base[0] = 4.0
 	_furnace_light.omni_range = 16.0
-	GameNoise.emit(get_tree(), lever.global_position, 200.0, GameNoise.Kind.MACHINE)
+	if multiplayer.is_server():
+		GameNoise.emit(get_tree(), lever.global_position, 200.0, GameNoise.Kind.MACHINE)
 	boiler_restarted.emit()
+
+
+## Picks this run's loot: [{item, pos, rot}] at shuffled spots.
+func roll_loot() -> Array:
+	var spots := LOOT_SPOTS.duplicate()
+	for i in range(spots.size() - 1, 0, -1):
+		var j := rng.randi_range(0, i)
+		var tmp = spots[i]
+		spots[i] = spots[j]
+		spots[j] = tmp
+	var result := []
+	for i in mini(rng.randi_range(LOOT_MIN, LOOT_MAX), spots.size()):
+		result.append({"item": LootTable.roll(rng), "pos": spots[i], "rot": rng.randf_range(0.0, TAU)})
+	return result
 
 
 func _build_environment() -> void:
@@ -123,9 +140,9 @@ func _build_boiler() -> void:
 	_cylinder(Vector3(-3.2, 7.8, -16), Vector3(-15.9, 7.8, -16), 0.4, "pipe")
 
 	lever = BoilerLever.new()
+	lever.name = "Lever"
 	lever.position = Vector3(3.5, 0, -10.5)
 	_nav.add_child(lever)
-	lever.pulled.connect(func(_pos: Vector3) -> void: restart_boiler())
 
 
 func _build_catwalks() -> void:
@@ -178,7 +195,7 @@ func _build_rooms() -> void:
 		var locker := Locker.new()
 		locker.position = spec[0]
 		locker.rotation.y = spec[1]
-		locker.rng = rng
+		locker.name = "Locker%d" % lockers.size()
 		_nav.add_child(locker)
 		lockers.append(locker)
 
@@ -249,22 +266,6 @@ func _bake_navigation() -> void:
 	mesh.cell_height = 0.25
 	_nav.navigation_mesh = mesh
 	_nav.bake_navigation_mesh(false)
-
-
-func _spawn_loot() -> void:
-	var spots := LOOT_SPOTS.duplicate()
-	for i in range(spots.size() - 1, 0, -1):
-		var j := rng.randi_range(0, i)
-		var tmp = spots[i]
-		spots[i] = spots[j]
-		spots[j] = tmp
-	var count := mini(rng.randi_range(LOOT_MIN, LOOT_MAX), spots.size())
-	for i in count:
-		var item := LootItem.from_data(LootTable.roll(rng))
-		item.freeze = true
-		item.position = spots[i]
-		item.rotation.y = rng.randf_range(0.0, TAU)
-		add_child(item)
 
 
 ## Static box. layer 0 = visual only; geometry lives under the nav region so it gets baked.

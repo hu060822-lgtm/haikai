@@ -30,11 +30,21 @@ func _run() -> void:
 		await process_frame
 	_save(out_dir, "loadout")
 
+	main.session.host(24560)
+	var guest_id := 2
+	main.session.roster[guest_id] = {"name": "阿明"}
+	main.session.roster_changed.emit()
+	main.show_lobby()
+	for i in 10:
+		await process_frame
+	_save(out_dir, "lobby")
+	main.session.leave()
+
 	main.show_menus = false
 	main.start_run({"weapon": "crowbar", "boosts": ["adrenaline"]})
-	main.colossus.process_mode = Node.PROCESS_MODE_DISABLED
 	for i in 30:
 		await process_frame
+	main.colossus.process_mode = Node.PROCESS_MODE_DISABLED
 	for shot in SHOTS:
 		main.player.global_position = shot.pos
 		main.player.rotation.y = shot.yaw
@@ -45,6 +55,21 @@ func _run() -> void:
 		for i in 20:
 			await process_frame
 		_save(out_dir, shot.name)
+
+	# A teammate, as other players see them.
+	var mate := Player.new()
+	mate.display_name = "阿明"
+	mate.set_multiplayer_authority(guest_id)
+	main.run.players_root.add_child(mate)
+	mate.global_position = Vector3(4.0, 0.1, 15.5)
+	mate.rotation.y = PI * 0.85
+	main.player.global_position = Vector3(4.0, 0.1, 19.0)
+	main.player.rotation.y = 0.0
+	main.player.get_child(1).rotation.x = 0.0
+	main.hud.set_voice("speaking")
+	for i in 20:
+		await process_frame
+	_save(out_dir, "teammate")
 
 	var result := ResultScreen.new()
 	result.survived = true

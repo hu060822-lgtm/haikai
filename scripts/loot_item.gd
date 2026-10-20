@@ -45,6 +45,17 @@ func _ready() -> void:
 	collider.shape = shape
 	add_child(collider)
 
+	# The host simulates loot physics; everyone else follows its transform.
+	var sync := MultiplayerSynchronizer.new()
+	sync.name = "Sync"
+	var config := SceneReplicationConfig.new()
+	for path in [NodePath(".:position"), NodePath(".:rotation")]:
+		config.add_property(path)
+		config.property_set_spawn(path, true)
+		config.property_set_replication_mode(path, SceneReplicationConfig.REPLICATION_MODE_ON_CHANGE)
+	sync.replication_config = config
+	add_child(sync)
+
 	# Rare loot glints so it reads in the dark.
 	if data.rarity >= 2:
 		var glint := OmniLight3D.new()
@@ -68,12 +79,19 @@ func get_prompt(_player: Player = null) -> String:
 
 
 func interact(player: Player) -> void:
-	if player.pickup(to_data()):
-		Sfx.play_3d(get_parent(), global_position, "pickup", -6.0)
+	if not player.can_carry(data):
+		player.message.emit("太重了，背不動")
+		return
+	# The host decides who gets it, so two players can't grab the same item.
+	if Run.instance != null:
+		Run.instance.request_pickup(self)
+	elif player.pickup(to_data()):
 		queue_free()
 
 
 func _on_body_entered(_body: Node) -> void:
+	if not multiplayer.is_server():
+		return
 	var speed := linear_velocity.length()
 	if speed < 1.5:
 		return

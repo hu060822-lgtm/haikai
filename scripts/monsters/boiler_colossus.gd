@@ -31,8 +31,20 @@ const VENT_DURATION := 5.0
 const UNREACHABLE_GIVE_UP := 10.0
 const WHISTLE_COOLDOWN := 10.0
 
-var state := State.PATROL
-var enraged := false
+## AI runs on the host only; clients get state, transform and velocity replicated and
+## play the matching animation and sounds themselves.
+var state := State.PATROL:
+	set(value):
+		var changed := value != state
+		state = value
+		if changed and is_node_ready():
+			_apply_state_effects()
+var enraged := false:
+	set(value):
+		enraged = value
+		if value and is_node_ready():
+			_eye_material.set_shader_parameter("emission_color", Color(1.0, 0.15, 0.05))
+			_eye_light.light_color = Color(1.0, 0.2, 0.05)
 var patrol_points: Array[Vector3] = []
 var rng := RandomNumberGenerator.new()
 
@@ -79,14 +91,26 @@ func _ready() -> void:
 	add_child(_agent)
 
 	_build_model()
+	_build_sync()
 	_vent_timer = rng.randf_range(VENT_INTERVAL_MIN, VENT_INTERVAL_MAX)
+
+
+func _build_sync() -> void:
+	var sync := MultiplayerSynchronizer.new()
+	sync.name = "Sync"
+	var config := SceneReplicationConfig.new()
+	for path in [".:position", ".:rotation", ".:velocity", ".:state", ".:enraged"]:
+		var node_path := NodePath(path)
+		config.add_property(node_path)
+		config.property_set_spawn(node_path, true)
+		config.property_set_replication_mode(node_path, SceneReplicationConfig.REPLICATION_MODE_ALWAYS)
+	sync.replication_config = config
+	add_child(sync)
 
 
 ## Called by the level when the boiler restarts: everything is awake now.
 func enrage(noise_position: Vector3) -> void:
 	enraged = true
-	_eye_material.set_shader_parameter("emission_color", Color(1.0, 0.15, 0.05))
-	_eye_light.light_color = Color(1.0, 0.2, 0.05)
 	if state != State.CHASE:
 		_investigate(noise_position)
 
@@ -104,6 +128,9 @@ func hear(position: Vector3, radius: float, _kind: int) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if not multiplayer.is_server():
+		_animate(delta)
+		return
 	_state_time += delta
 	_whistle_cooldown = maxf(_whistle_cooldown - delta, 0.0)
 	if not is_on_floor():
@@ -116,8 +143,8 @@ func _physics_process(delta: float) -> void:
 		if _vent_timer <= 0.0:
 			_enter(State.VENT)
 
-	var player := _find_player()
-	if player != null and state != State.VENT and _can_sense(player):
+	var player := _find_sensed_player()
+	if player != null:
 		_last_seen = player.global_position
 		_since_seen = 0.0
 		if state != State.CHASE:
@@ -159,7 +186,7 @@ func _physics_process(delta: float) -> void:
 	if enraged:
 		speed *= ENRAGED_MULT
 	_move(speed, delta, player)
-	_check_kill(player)
+	_check_kills()
 	_animate(delta)
 
 
@@ -167,19 +194,20 @@ func _enter(new_state: State) -> void:
 	state = new_state
 	_state_time = 0.0
 	_unreachable_time = 0.0
-	match new_state:
+	if new_state == State.PATROL:
+		_pick_patrol_point()
+	state_changed.emit(new_state)
+
+
+## Sounds and visuals for a state change; runs on every peer.
+func _apply_state_effects() -> void:
+	match state:
 		State.CHASE:
 			_play_whistle()
 		State.VENT:
-			_steam.emitting = true
-			_eye_light.light_energy = 0.2
 			Sfx.play_3d(get_parent(), global_position + Vector3.UP * HEIGHT, "hiss", 4.0, 50.0)
-		State.PATROL:
-			_pick_patrol_point()
-	if new_state != State.VENT:
-		_steam.emitting = false
-		_eye_light.light_energy = 1.5
-	state_changed.emit(new_state)
+	_steam.emitting = state == State.VENT
+	_eye_light.light_energy = 0.2 if state == State.VENT else 1.5
 
 
 func _investigate(position: Vector3) -> void:
@@ -233,11 +261,19 @@ func _nav_ready() -> bool:
 	return NavigationServer3D.map_get_iteration_id(_agent.get_navigation_map()) > 0
 
 
-func _find_player() -> Player:
+## The closest player it can currently see or feel, if any.
+func _find_sensed_player() -> Player:
+	if state == State.VENT:
+		return null
+	var best: Player = null
+	var best_distance := INF
 	for node in get_tree().get_nodes_in_group("player"):
-		if node is Player and not node.is_dead:
-			return node
-	return null
+		if node is Player and node.is_active() and _can_sense(node):
+			var distance := global_position.distance_to(node.global_position)
+			if distance < best_distance:
+				best = node
+				best_distance = distance
+	return best
 
 
 func _can_sense(player: Player) -> bool:
@@ -262,14 +298,19 @@ func _can_sense(player: Player) -> bool:
 	return hit.is_empty() or hit.collider == player
 
 
-func _check_kill(player: Player) -> void:
-	if player == null or state == State.VENT:
+func _check_kills() -> void:
+	if state == State.VENT:
 		return
-	var offset := player.global_position - global_position
-	if absf(offset.y) > KILL_HEIGHT:
-		return
-	if Vector2(offset.x, offset.z).length() < KILL_DISTANCE:
-		player.die("被鍋爐巨像抓住了")
+	for node in get_tree().get_nodes_in_group("player"):
+		var player := node as Player
+		if player == null or not player.is_active():
+			continue
+		var offset := player.global_position - global_position
+		if absf(offset.y) <= KILL_HEIGHT and Vector2(offset.x, offset.z).length() < KILL_DISTANCE:
+			if Run.instance != null:
+				Run.instance.host_kill(player, "被鍋爐巨像抓住了")
+			else:
+				player.die("被鍋爐巨像抓住了")
 
 
 func _play_whistle() -> void:
@@ -299,8 +340,9 @@ func _animate(delta: float) -> void:
 func _footstep() -> void:
 	Sfx.play_3d(get_parent(), global_position, "thump", 4.0, 70.0, rng.randf_range(0.85, 1.05))
 	for node in get_tree().get_nodes_in_group("player"):
-		var distance: float = node.global_position.distance_to(global_position)
-		node.add_shake(clampf(1.0 - distance / 30.0, 0.0, 1.0) * 0.7)
+		if node.is_multiplayer_authority():
+			var distance: float = node.global_position.distance_to(global_position)
+			node.add_shake(clampf(1.0 - distance / 30.0, 0.0, 1.0) * 0.7)
 
 
 func _build_model() -> void:

@@ -3,13 +3,22 @@ extends Control
 ## Pre-run screen: shows money and stats, lets the player pick carry-in gear, then start.
 ## Picking gear takes it from the stash or buys it; un-picking puts it back in the stash.
 
-signal start_requested(loadout: Dictionary)
+signal solo_requested()
+signal host_requested()
+signal join_requested(address: String)
 
-var _loadout := {"weapon": "", "boosts": []}
+## Remembered across visits to the screen.
+static var last_address := "127.0.0.1"
+
+var _loadout: Dictionary:
+	get: return GameState.equipped
 var _money_label: Label
 var _stats_label: Label
 var _loadout_label: Label
 var _buttons := {}
+var _name_edit: LineEdit
+var _address_edit: LineEdit
+var _status: Label
 
 
 func _ready() -> void:
@@ -24,7 +33,7 @@ func _ready() -> void:
 	add_child(column)
 	column.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	column.custom_minimum_size = Vector2(760, 0)
-	column.position -= Vector2(380, 300)
+	column.position -= Vector2(380, 340)
 
 	column.add_child(UiKit.label("HAIKAI", 56, UiKit.ACCENT))
 	column.add_child(UiKit.label("倉庫：選好進場要帶的東西。死掉會全部失去，活著撤離就能帶回來。", 18))
@@ -49,11 +58,52 @@ func _ready() -> void:
 
 	_loadout_label = UiKit.label("", 18)
 	column.add_child(_loadout_label)
-	var go := UiKit.button("出發：黑暗鍋爐工廠", _start)
-	go.custom_minimum_size = Vector2(0, 56)
-	go.add_theme_font_size_override("font_size", 24)
-	column.add_child(go)
+
+	var name_row := HBoxContainer.new()
+	name_row.add_theme_constant_override("separation", 12)
+	name_row.add_child(UiKit.label("名字", 18))
+	_name_edit = UiKit.line_edit(Session.instance.local_name if Session.instance else "拾荒者", 16)
+	_name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_row.add_child(_name_edit)
+	column.add_child(name_row)
+
+	var go_row := HBoxContainer.new()
+	go_row.add_theme_constant_override("separation", 12)
+	var solo := UiKit.button("單人出發", func() -> void: _commit_name(); solo_requested.emit())
+	var host := UiKit.button("建立房間", func() -> void: _commit_name(); host_requested.emit())
+	for button in [solo, host]:
+		button.custom_minimum_size = Vector2(0, 52)
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		button.add_theme_font_size_override("font_size", 22)
+		go_row.add_child(button)
+	column.add_child(go_row)
+
+	var join_row := HBoxContainer.new()
+	join_row.add_theme_constant_override("separation", 12)
+	_address_edit = UiKit.line_edit(last_address, 64)
+	_address_edit.placeholder_text = "主機的 IP"
+	_address_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	join_row.add_child(_address_edit)
+	var join := UiKit.button("加入房間", func() -> void:
+		_commit_name()
+		last_address = _address_edit.text.strip_edges()
+		join_requested.emit(last_address))
+	join.custom_minimum_size = Vector2(200, 44)
+	join_row.add_child(join)
+	column.add_child(join_row)
+	_status = UiKit.label("", 16, Color(1.0, 0.5, 0.4))
+	column.add_child(_status)
 	_refresh()
+
+
+func show_status(text: String) -> void:
+	_status.text = text
+
+
+func _commit_name() -> void:
+	var entered := _name_edit.text.strip_edges()
+	if Session.instance != null and entered != "":
+		Session.instance.local_name = entered.substr(0, 16)
 
 
 func _toggle(id: String) -> void:
@@ -81,10 +131,6 @@ func _toggle(id: String) -> void:
 
 func _is_equipped(id: String) -> bool:
 	return _loadout.weapon == id or id in _loadout.boosts
-
-
-func _start() -> void:
-	start_requested.emit(_loadout.duplicate(true))
 
 
 func _refresh() -> void:

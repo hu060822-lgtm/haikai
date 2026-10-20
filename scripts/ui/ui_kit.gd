@@ -33,3 +33,20 @@ static func button(text: String, on_pressed: Callable) -> Button:
 	result.add_theme_stylebox_override("focus", normal)
 	result.pressed.connect(on_pressed)
 	return result
+
+
+static func line_edit(text: String, max_length := 32) -> LineEdit:
+	var result := LineEdit.new()
+	result.text = text
+	result.max_length = max_length
+	result.custom_minimum_size = Vector2(0, 40)
+	result.add_theme_font_size_override("font_size", 18)
+	result.add_theme_color_override("font_color", TEXT)
+	var box := StyleBoxFlat.new()
+	box.bg_color = Color(0.1, 0.08, 0.06)
+	box.border_color = Color(0.45, 0.32, 0.18)
+	box.set_border_width_all(2)
+	box.set_content_margin_all(8)
+	result.add_theme_stylebox_override("normal", box)
+	result.add_theme_stylebox_override("focus", box)
+	return result
