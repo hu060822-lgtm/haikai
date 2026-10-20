@@ -178,6 +178,27 @@ func _tagged(player: Player) -> void:
 	_leave()
 
 
+## Host: a weapon got it. It isn't hurt; it just runs off to play elsewhere for a while.
+func host_kill() -> void:
+	_play.rpc("giggle", 1.6)
+	_leave()
+
+
+## Local only: cat-eye drops make it glow where it hides.
+func set_spotted(on: bool) -> void:
+	var glow := get_node_or_null("Spotted")
+	if on and glow == null:
+		var light := OmniLight3D.new()
+		light.name = "Spotted"
+		light.light_color = Color(0.5, 1.0, 0.6)
+		light.light_energy = 1.5
+		light.omni_range = 2.5
+		light.position.y = 0.8
+		add_child(light)
+	elif not on and glow != null:
+		glow.queue_free()
+
+
 func _leave() -> void:
 	state = State.AWAY
 	_timer = AWAY_TIME

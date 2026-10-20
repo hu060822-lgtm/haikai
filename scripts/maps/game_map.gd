@@ -29,6 +29,8 @@ var monster_spawn := Vector3.ZERO
 var patrol_points: Array[Vector3] = []
 var loot_spots: Array[Vector3] = []
 var loot_count := Vector2i(14, 18)
+## A map lit so brightly that lanterns and night vision don't matter (the dreamcore one).
+var bright := false
 ## This run's item pool (LootTable.make_pool), set by the host before loot is rolled.
 var loot_pool: Array = []
 ## Where the guardian may release monsters: x/z half extents and a height range.

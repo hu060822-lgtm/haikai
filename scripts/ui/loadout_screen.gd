@@ -19,6 +19,7 @@ var _buttons := {}
 var _name_edit: LineEdit
 var _address_edit: LineEdit
 var _status: Label
+var _desc: Label
 
 
 func _ready() -> void:
@@ -29,32 +30,44 @@ func _ready() -> void:
 	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 12)
+	column.add_theme_constant_override("separation", 8)
 	add_child(column)
 	column.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	column.custom_minimum_size = Vector2(760, 0)
-	column.position -= Vector2(380, 340)
+	column.position -= Vector2(380, 356)
 
-	column.add_child(UiKit.label("HAIKAI", 56, UiKit.ACCENT))
+	column.add_child(UiKit.label("HAIKAI", 40, UiKit.ACCENT))
 	column.add_child(UiKit.label("倉庫：選好進場要帶的東西。死掉會全部失去，活著撤離就能帶回來。", 18))
 	_money_label = UiKit.label("", 26, UiKit.ACCENT)
 	column.add_child(_money_label)
 	_stats_label = UiKit.label("", 16, UiKit.DIM)
 	column.add_child(_stats_label)
 
-	for id in Gear.ITEMS:
-		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 16)
-		var button := UiKit.button("", func() -> void: _toggle(id))
-		button.custom_minimum_size = Vector2(260, 44)
-		_buttons[id] = button
-		row.add_child(button)
-		var desc := UiKit.label(Gear.ITEMS[id].desc, 15, UiKit.DIM)
-		desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		desc.custom_minimum_size = Vector2(480, 0)
-		desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-		row.add_child(desc)
-		column.add_child(row)
+	for slot in ["weapon", "boost"]:
+		var heading := "武器（選一把）" if slot == "weapon" else "強化（最多 %d 個）" % Gear.MAX_BOOSTS
+		var title := UiKit.label(heading, 16, UiKit.ACCENT)
+		title.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		column.add_child(title)
+		var grid := GridContainer.new()
+		grid.columns = 5
+		grid.add_theme_constant_override("h_separation", 6)
+		grid.add_theme_constant_override("v_separation", 6)
+		for id in Gear.ITEMS:
+			if Gear.ITEMS[id].slot != slot:
+				continue
+			var button := UiKit.button("", func() -> void: _toggle(id))
+			button.custom_minimum_size = Vector2(148, 50)
+			button.add_theme_font_size_override("font_size", 13)
+			button.clip_text = true
+			button.mouse_entered.connect(func() -> void: _describe(id))
+			button.focus_entered.connect(func() -> void: _describe(id))
+			_buttons[id] = button
+			grid.add_child(button)
+		column.add_child(grid)
+	_desc = UiKit.label("把滑鼠移到裝備上看說明。", 15, UiKit.DIM)
+	_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_desc.custom_minimum_size = Vector2(760, 36)
+	column.add_child(_desc)
 
 	_loadout_label = UiKit.label("", 18)
 	column.add_child(_loadout_label)
@@ -94,6 +107,11 @@ func _ready() -> void:
 	_status = UiKit.label("", 16, Color(1.0, 0.5, 0.4))
 	column.add_child(_status)
 	_refresh()
+
+
+func _describe(id: String) -> void:
+	var info := Gear.info(id)
+	_desc.text = "%s（$%d・%.1fkg）：%s" % [info.name, info.price, info.weight, info.desc]
 
 
 func show_status(text: String) -> void:
@@ -141,11 +159,11 @@ func _refresh() -> void:
 		var owned := GameState.owned(id)
 		var text: String = info.name
 		if _is_equipped(id):
-			text = "✓ " + text + "（已裝備）"
+			text = "✓ " + text + "\n已裝備"
 		elif owned > 0:
-			text += "（擁有 %d）" % owned
+			text += "\n擁有 %d" % owned
 		else:
-			text += "　$%d" % info.price
+			text += "\n$%d" % info.price
 		_buttons[id].text = text
 	var names := []
 	for id in Gear.loadout_ids(_loadout):
