@@ -10,6 +10,7 @@ var _inventory: Label
 var _gear: Label
 var _timer: Label
 var _objective: Label
+var _status: Label
 var _health: ProgressBar
 var _stamina: ProgressBar
 var _extract: ProgressBar
@@ -42,6 +43,12 @@ func _ready() -> void:
 	_objective.position += Vector2(-16.0, 14.0)
 	_objective.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_objective.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+
+	_status = _label("", 18, Control.PRESET_TOP_RIGHT)
+	_status.position += Vector2(-16.0, 40.0)
+	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_status.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_status.add_theme_color_override("font_color", Color(0.6, 0.85, 1.0))
 
 	_inventory = _label("", 20, Control.PRESET_BOTTOM_LEFT)
 	_inventory.position += Vector2(24.0, -120.0)
@@ -116,6 +123,11 @@ func set_voice(state: String) -> void:
 			_voice.add_theme_color_override("font_color", TEXT_COLOR)
 		_:
 			_voice.text = ""
+
+
+## A map-specific line under the objective (body heat on the ice station).
+func set_status(text: String) -> void:
+	_status.text = text
 
 
 func set_objective(text: String) -> void:

@@ -174,11 +174,43 @@ def bite():
             for i, c in enumerate(crunch)]
 
 
+def chime():
+    """The mall PA's two-tone ding-dong, slightly out of tune."""
+    n = int(RATE * 1.4)
+    out = []
+    for i in range(n):
+        t = i / RATE
+        f, start = (659.0, 0.0) if t < 0.6 else (523.0 * 0.985, 0.6)
+        local = t - start
+        tone = math.sin(2 * math.pi * f * local) + 0.3 * math.sin(2 * math.pi * f * 2.01 * local)
+        out.append(tone * math.exp(-local / 0.35) * 0.45)
+    return out
+
+
+def wind():
+    """A looping blizzard howl."""
+    n = int(RATE * 4.0)
+    base = lowpass(noise(n), 0.06)
+    out = []
+    for i, b in enumerate(base):
+        t = i / RATE
+        swell = 0.6 + 0.4 * math.sin(2 * math.pi * t / 4.0)
+        howl = math.sin(2 * math.pi * (180 + 40 * math.sin(2 * math.pi * t / 2.0)) * t) * 0.08
+        out.append((b * 2.2 + howl) * swell)
+    # Cross-fade the ends so it loops cleanly.
+    fade = int(RATE * 0.3)
+    for i in range(fade):
+        k = i / fade
+        out[i] = out[i] * k + out[n - fade + i] * (1 - k)
+    return out[: n - fade]
+
+
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
     for name, fn in [("thump", thump), ("hiss", hiss), ("whistle", whistle), ("step", step),
                      ("pickup", pickup), ("clank", clank), ("tink", tink), ("drone", drone),
                      ("heartbeat", heartbeat), ("death", death), ("creak", creak),
-                     ("flutter", flutter), ("screech", screech), ("tick", tick), ("bite", bite)]:
+                     ("flutter", flutter), ("screech", screech), ("tick", tick), ("bite", bite),
+                     ("chime", chime), ("wind", wind)]:
         write(name, fn())
     print("sounds written to", os.path.abspath(OUT))

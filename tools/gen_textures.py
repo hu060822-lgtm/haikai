@@ -140,6 +140,82 @@ def brass():
     return fn
 
 
+def tile():
+    """Mall floor: cream and teal checker with grimy grout."""
+    state = {}
+
+    def fn(rng, x, y):
+        if "n" not in state:
+            state["n"] = value_noise(rng, 16)
+        if x % 16 == 0 or y % 16 == 0:
+            return shade((70, 66, 58), 0.9)
+        cream = ((x // 16) + (y // 16)) % 2 == 0
+        base = (200, 190, 160) if cream else (70, 130, 130)
+        return shade(base, 0.7 + 0.3 * state["n"](x, y) + rng.uniform(-0.03, 0.03))
+
+    return fn
+
+
+def carpet():
+    """Shop carpet: 90s confetti pattern on dark purple."""
+    def fn(rng, x, y):
+        r = rng.random()
+        if r < 0.04:
+            return (200, 60, 120)
+        if r < 0.08:
+            return (60, 170, 200)
+        if r < 0.1:
+            return (220, 200, 60)
+        return shade((54, 36, 70), rng.uniform(0.85, 1.1))
+
+    return fn
+
+
+def panel():
+    """Research station: off-white wall panels with rivets and seams."""
+    state = {}
+
+    def fn(rng, x, y):
+        if "n" not in state:
+            state["n"] = value_noise(rng, 16)
+        k = 0.75 + 0.2 * state["n"](x, y)
+        if x % 32 in (0, 1) or y % 64 in (0, 1):
+            k *= 0.6
+        if (x % 32, y % 16) in ((4, 4), (27, 4)):
+            k = 0.5
+        return shade((196, 200, 196), k)
+
+    return fn
+
+
+def snow():
+    state = {}
+
+    def fn(rng, x, y):
+        if "n" not in state:
+            state["n"] = value_noise(rng, 8)
+            state["m"] = value_noise(rng, 32)
+        k = 0.82 + 0.1 * state["n"](x, y) + 0.08 * state["m"](x, y) + rng.uniform(-0.02, 0.02)
+        return shade((226, 232, 240), k)
+
+    return fn
+
+
+def wood():
+    state = {}
+
+    def fn(rng, x, y):
+        if "n" not in state:
+            state["n"] = value_noise(rng, 4)
+        plank = y // 16
+        grain = 0.8 + 0.2 * state["n"]((x * 0.25 + plank * 7) % 63, (y * 2) % 63)
+        if y % 16 == 0:
+            return shade((60, 40, 26), 0.8)
+        return shade((140, 96, 58), grain * (0.9 + 0.1 * (plank % 3)))
+
+    return fn
+
+
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
     make("concrete", concrete(), 1)
@@ -148,4 +224,9 @@ if __name__ == "__main__":
     make("grate", grate(), 4)
     make("pipe", pipe(), 5)
     make("brass", brass(), 6)
+    make("tile", tile(), 7)
+    make("carpet", carpet(), 8)
+    make("panel", panel(), 9)
+    make("snow", snow(), 10)
+    make("wood", wood(), 11)
     print("textures written to", os.path.abspath(OUT))

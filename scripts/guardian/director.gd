@@ -42,7 +42,7 @@ func decide() -> String:
 	var level := run.level
 
 	# Someone is about to leave: kill the lift's power.
-	if level.boiler_on and field.can_use("power"):
+	if level.objective_on and field.can_use("power"):
 		for player in players:
 			if player.global_position.distance_to(level.extraction_zone.global_position) < NEAR_EXTRACTION:
 				if field.use_power():

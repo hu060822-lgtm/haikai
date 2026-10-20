@@ -7,6 +7,7 @@ extends StaticBody3D
 signal interact_requested()
 
 var is_pulled := false
+var prompt := "[E] 拉下拉桿"
 var _handle: Node3D
 
 
@@ -49,7 +50,7 @@ func _ready() -> void:
 func get_prompt(_player: Player = null) -> String:
 	if is_pulled:
 		return ""
-	return "[E] 重啟主鍋爐（升降梯會通電，但整座工廠會醒來）"
+	return prompt
 
 
 func interact(_player: Player) -> void:

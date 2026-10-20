@@ -7,8 +7,6 @@ extends CanvasLayer
 
 const TEXT := Color(0.92, 0.86, 0.72)
 const PING_LIFE := 2.5
-const CAMERA_HEIGHT := 11.5
-const MAP_SIZE := 46.0
 
 var run: Run
 ## Low-res viewport pixels -> screen pixels (the run view's stretch_shrink).
@@ -140,7 +138,7 @@ func _draw_overlay() -> void:
 		_overlay.draw_string(font, at + Vector2(-14, -20), "閘" if not gate.closed else "關", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, color)
 	var extraction := _to_screen(run.level.extraction_zone.global_position)
 	_overlay.draw_circle(extraction, 18.0, Color(0.4, 1.0, 0.6, 0.25) if run.level.extraction_zone.powered else Color(1, 0.3, 0.2, 0.2))
-	_overlay.draw_string(font, extraction + Vector2(-16, 34), "升降梯", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, TEXT)
+	_overlay.draw_string(font, extraction + Vector2(-16, 34), run.level.exit_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, TEXT)
 	for monster in run.monsters_root.get_children():
 		if monster is Node3D and monster.visible:
 			var at := _to_screen(monster.global_position)
@@ -155,10 +153,13 @@ func _draw_overlay() -> void:
 func _build_camera() -> void:
 	camera = Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera.size = MAP_SIZE
+	var bounds := run.level.bounds
+	var center := bounds.get_center()
+	camera.size = maxf(bounds.size.z, bounds.size.x * 0.56) + 3.0
 	camera.near = 0.05
-	camera.far = CAMERA_HEIGHT + 2.0
-	camera.position = Vector3(0, CAMERA_HEIGHT, 0)
+	camera.cull_mask &= ~GameMap.ROOF_RENDER_LAYER
+	camera.far = run.level.overview_height + 2.0
+	camera.position = Vector3(center.x, run.level.overview_height, center.z)
 	camera.rotation = Vector3(-PI / 2.0, 0.0, 0.0)
 	run.add_child(camera)
 	camera.current = true

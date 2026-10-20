@@ -1,12 +1,9 @@
 class_name BoilerFactory
-extends Node3D
-## 黑暗鍋爐工廠 (phase 1 greybox). A tall dark hall with the main boiler at the north end,
-## catwalks along both walls at 6 m reached by ladders, two walkable pipes joining them,
-## a crawl duct, and two small rooms with narrow doors. Big monsters can only use the
-## open floor, so height and tight spaces are where the player is safe.
-## Built in code so layout tweaks are quick; real levels will be modular scenes.
-
-signal boiler_restarted()
+extends GameMap
+## 黑暗鍋爐工廠. A tall dark hall with the main boiler at the north end, catwalks along
+## both walls at 6 m reached by ladders, two walkable pipes joining them, a crawl duct,
+## and two small rooms with narrow doors. Big monsters can only use the open floor,
+## so height and tight spaces are where the player is safe.
 
 const CATWALK_Y := 6.0
 const LOOT_MIN := 14
@@ -31,34 +28,25 @@ const PATROL_POINTS := [
 	Vector3(4, 0, 17), Vector3(-6, 0, 18), Vector3(0, 0, 0),
 ]
 
-var player_spawn := Vector3(4.0, 0.1, 19.0)
-var player_spawn_yaw := 0.0
-var monster_spawn := Vector3(0.0, 0.1, -6.0)
-var extraction_zone: ExtractionZone
-var lever: BoilerLever
-var lockers: Array[Locker] = []
-var gates: Array[Gate] = []
-## The extraction lift needs the boiler restarted AND the power on (the guardian can cut it).
-var boiler_on := false
-var power_on := true
-var rng := RandomNumberGenerator.new()
-## Only the host needs the navmesh (monsters run there).
-var build_navigation := true
-
-var _nav: NavigationRegion3D
-var _flicker_lights: Array[OmniLight3D] = []
-var _flicker_base: Array[float] = []
-var _all_lights: Array[OmniLight3D] = []
-var _light_energy: Array[float] = []
 var _furnace_light: OmniLight3D
-var _noise := FastNoiseLite.new()
-var _time := 0.0
 
 
-func _ready() -> void:
-	_nav = NavigationRegion3D.new()
-	_nav.name = "Nav"
-	add_child(_nav)
+func build() -> void:
+	map_name = "黑暗鍋爐工廠"
+	intro = "找值錢的東西。升降梯要先重啟主鍋爐才會動。"
+	objective_text = "重啟主鍋爐（北邊）"
+	exit_text = "到升降梯撤離"
+	objective_message = "主鍋爐重啟了。升降梯有電了…整座工廠也醒了。"
+	blocked_message = "升降梯沒電。先去重啟主鍋爐。"
+	exit_name = "升降梯"
+	warning_message = "鍋爐壓力過高！兩分鐘後爆炸！"
+	timeout_cause = "鍋爐爆炸了，你沒來得及出去"
+	player_spawn = Vector3(4.0, 0.1, 19.0)
+	monster_spawn = Vector3(0.0, 0.1, -6.0)
+	patrol_points.assign(PATROL_POINTS)
+	loot_spots.assign(LOOT_SPOTS)
+	loot_count = Vector2i(LOOT_MIN, LOOT_MAX)
+	bounds = AABB(Vector3(-15.5, -0.5, -21.5), Vector3(31, 7.5, 43))
 	_build_environment()
 	_build_shell()
 	_build_boiler()
@@ -70,78 +58,15 @@ func _ready() -> void:
 	_build_lights()
 	_build_extraction()
 	_build_gates()
-	for node in find_children("*", "OmniLight3D", true, false):
-		_all_lights.append(node)
-		_light_energy.append(node.light_energy)
-	if build_navigation:
-		_bake_navigation()
 
 
-func _process(delta: float) -> void:
-	_time += delta
-	if not power_on:
-		return
-	for i in _flicker_lights.size():
-		var n := _noise.get_noise_2d(_time * 8.0, float(i) * 50.0)
-		_flicker_lights[i].light_energy = _flicker_base[i] * (0.75 + 0.35 * n)
-
-
-func restart_boiler() -> void:
-	boiler_on = true
-	extraction_zone.powered = boiler_on and power_on
+func _on_objective() -> void:
 	_flicker_base[0] = 4.0
 	_furnace_light.omni_range = 16.0
-	if multiplayer.is_server():
-		GameNoise.emit(get_tree(), lever.global_position, 200.0, GameNoise.Kind.MACHINE)
-	boiler_restarted.emit()
-
-
-## Blackout or power back. Runs on every peer.
-func set_power(on: bool) -> void:
-	power_on = on
-	extraction_zone.powered = boiler_on and power_on
-	for i in _all_lights.size():
-		var light := _all_lights[i]
-		if not is_instance_valid(light):
-			continue
-		light.light_energy = _light_energy[i] if on else 0.0
-	Sfx.play_3d(self, Vector3(0, 6, 0), "thump" if not on else "hiss", 2.0, 80.0, 0.5 if not on else 1.4)
-
-
-## Picks this run's loot: [{item, pos, rot}] at shuffled spots.
-func roll_loot() -> Array:
-	var spots := LOOT_SPOTS.duplicate()
-	for i in range(spots.size() - 1, 0, -1):
-		var j := rng.randi_range(0, i)
-		var tmp = spots[i]
-		spots[i] = spots[j]
-		spots[j] = tmp
-	var result := []
-	for i in mini(rng.randi_range(LOOT_MIN, LOOT_MAX), spots.size()):
-		result.append({"item": LootTable.roll(rng), "pos": spots[i], "rot": rng.randf_range(0.0, TAU)})
-	return result
 
 
 func _build_environment() -> void:
-	var env := Environment.new()
-	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(0.02, 0.018, 0.016)
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.22, 0.2, 0.26)
-	env.ambient_light_energy = 0.35
-	env.fog_enabled = true
-	env.fog_light_color = Color(0.05, 0.045, 0.04)
-	env.fog_density = 0.06
-	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	var world_env := WorldEnvironment.new()
-	world_env.environment = env
-	add_child(world_env)
-
-	var ambience := AudioStreamPlayer.new()
-	ambience.stream = Sfx.looped("drone")
-	ambience.volume_db = -14.0
-	ambience.autoplay = true
-	add_child(ambience)
+	_environment(Color(0.02, 0.018, 0.016), Color(0.22, 0.2, 0.26), 0.35, Color(0.05, 0.045, 0.04), 0.06)
 
 
 func _build_shell() -> void:
@@ -164,10 +89,7 @@ func _build_boiler() -> void:
 	_cylinder(Vector3(3.2, 8.5, -15), Vector3(15.9, 8.5, -15), 0.5, "pipe")
 	_cylinder(Vector3(-3.2, 7.8, -16), Vector3(-15.9, 7.8, -16), 0.4, "pipe")
 
-	lever = BoilerLever.new()
-	lever.name = "Lever"
-	lever.position = Vector3(3.5, 0, -10.5)
-	_nav.add_child(lever)
+	_add_lever(Vector3(3.5, 0, -10.5), 0.0, "[E] 重啟主鍋爐（升降梯會通電，但整座工廠會醒來）")
 
 
 func _build_catwalks() -> void:
@@ -217,12 +139,7 @@ func _build_rooms() -> void:
 	_room(Vector3(-15.5, 0, 14), Vector3(-9.5, 0, 21.5), "east", 16.5)
 	_room(Vector3(9.5, 0, 14), Vector3(15.5, 0, 21.5), "west", 18.0)
 	for spec in [[Vector3(-14.8, 0, 17.5), PI / 2.0], [Vector3(-14.8, 0, 19.5), PI / 2.0], [Vector3(14.8, 0, 16.0), -PI / 2.0]]:
-		var locker := Locker.new()
-		locker.position = spec[0]
-		locker.rotation.y = spec[1]
-		locker.name = "Locker%d" % lockers.size()
-		_nav.add_child(locker)
-		lockers.append(locker)
+		_add_locker(spec[0], spec[1])
 
 
 func _room(min_corner: Vector3, max_corner: Vector3, door_side: String, door_z: float) -> void:
@@ -261,7 +178,6 @@ func _build_props() -> void:
 
 
 func _build_lights() -> void:
-	_noise.frequency = 0.3
 	_furnace_light = _light(Vector3(0, 1.3, -10.8), Color(1.0, 0.45, 0.15), 2.2, 10.0, true)
 	_light(Vector3(6, 10, 10), Color(1.0, 0.8, 0.5), 0.9, 12.0, true)
 	_light(Vector3(-8, 10, 0), Color(1.0, 0.8, 0.5), 0.7, 12.0, false)
@@ -275,9 +191,7 @@ func _build_extraction() -> void:
 	for corner in [Vector3(1.5, 0, 1.5), Vector3(-1.5, 0, 1.5), Vector3(1.5, 0, -1.5), Vector3(-1.5, 0, -1.5)]:
 		_box(Vector3(0.15, 3.0, 0.15), center + corner + Vector3(0, 1.5, 0), "brass")
 	_box(Vector3(3.2, 0.2, 3.2), center + Vector3(0, 3.1, 0), "rust_metal")
-	extraction_zone = ExtractionZone.new()
-	extraction_zone.position = center + Vector3(0, 1.25, 0)
-	add_child(extraction_zone)
+	_add_extraction(center)
 
 
 func _build_gates() -> void:
@@ -288,97 +202,4 @@ func _build_gates() -> void:
 		[Vector3(-5.0, 0.6, -2.0), Vector3(1.2, 1.1, 0.15)],
 		[Vector3(-5.0, 0.6, 8.0), Vector3(1.2, 1.1, 0.15)],
 	]:
-		var gate := Gate.new()
-		gate.name = "Gate%d" % gates.size()
-		gate.position = spec[0]
-		gate.size = spec[1]
-		add_child(gate)
-		gates.append(gate)
-
-
-func _bake_navigation() -> void:
-	var mesh := NavigationMesh.new()
-	mesh.geometry_parsed_geometry_type = NavigationMesh.PARSED_GEOMETRY_STATIC_COLLIDERS
-	mesh.geometry_collision_mask = Layers.WORLD
-	mesh.agent_radius = BoilerColossus.RADIUS
-	mesh.agent_height = BoilerColossus.HEIGHT
-	mesh.agent_max_climb = 0.4
-	mesh.cell_size = 0.25
-	mesh.cell_height = 0.25
-	_nav.navigation_mesh = mesh
-	_nav.bake_navigation_mesh(false)
-
-
-## Static box. layer 0 = visual only; geometry lives under the nav region so it gets baked.
-func _box(size: Vector3, pos: Vector3, texture: String, rot_deg := Vector3.ZERO,
-		layer := Layers.WORLD, tint := Color.WHITE, density := 0.5) -> Node3D:
-	var root: Node3D = StaticBody3D.new() if layer != 0 else Node3D.new()
-	if layer != 0:
-		root.collision_layer = layer
-		root.collision_mask = 0
-	root.position = pos
-	root.rotation_degrees = rot_deg
-	var mesh_instance := MeshInstance3D.new()
-	var mesh := BoxMesh.new()
-	mesh.size = size
-	# Subdivide large faces so vertex snapping and affine warping stay subtle.
-	mesh.subdivide_width = int(size.x / 2.0)
-	mesh.subdivide_height = int(size.y / 2.0)
-	mesh.subdivide_depth = int(size.z / 2.0)
-	mesh_instance.mesh = mesh
-	mesh_instance.material_override = PS1Materials.get_material(texture, tint, false, Vector2.ONE, Color.BLACK, density)
-	root.add_child(mesh_instance)
-	if layer != 0:
-		var collider := CollisionShape3D.new()
-		var shape := BoxShape3D.new()
-		shape.size = size
-		collider.shape = shape
-		root.add_child(collider)
-	_nav.add_child(root)
-	return root
-
-
-func _cylinder(from: Vector3, to: Vector3, radius: float, texture: String,
-		uv_scale := Vector2(2, 2), layer := Layers.WORLD) -> Node3D:
-	var axis := to - from
-	var length := axis.length()
-	var root: Node3D = StaticBody3D.new() if layer != 0 else Node3D.new()
-	if layer != 0:
-		root.collision_layer = layer
-		root.collision_mask = 0
-	root.position = (from + to) / 2.0
-	root.basis = Basis(Quaternion(Vector3.UP, axis.normalized()))
-	var mesh_instance := MeshInstance3D.new()
-	var mesh := CylinderMesh.new()
-	mesh.top_radius = radius
-	mesh.bottom_radius = radius
-	mesh.height = length
-	mesh.radial_segments = 8
-	mesh.rings = maxi(int(length / 2.0), 1)
-	mesh_instance.mesh = mesh
-	mesh_instance.material_override = PS1Materials.get_material(
-		texture, Color.WHITE, true, Vector2(uv_scale.x, uv_scale.y * length / 4.0))
-	root.add_child(mesh_instance)
-	if layer != 0:
-		var collider := CollisionShape3D.new()
-		var shape := CylinderShape3D.new()
-		shape.radius = radius
-		shape.height = length
-		collider.shape = shape
-		root.add_child(collider)
-	_nav.add_child(root)
-	return root
-
-
-func _light(pos: Vector3, color: Color, energy: float, light_range: float, flicker: bool) -> OmniLight3D:
-	var light := OmniLight3D.new()
-	light.position = pos
-	light.light_color = color
-	light.light_energy = energy
-	light.omni_range = light_range
-	light.omni_attenuation = 1.4
-	add_child(light)
-	if flicker:
-		_flicker_lights.append(light)
-		_flicker_base.append(energy)
-	return light
+		_add_gate(spec[0], spec[1])
