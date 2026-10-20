@@ -189,6 +189,15 @@ func _host_spawn_monsters() -> void:
 					data.pos = spot.pos
 					data.rot = spot.rot
 					data.disguise = LootTable.roll(rng, 0.8, level.loot_pool)
+				_:
+					# Roster-driven monsters: "spawn" is far (away from players), air or patrol.
+					match MonsterRoster.MONSTERS[kind].get("spawn", "patrol"):
+						"far":
+							data.pos = _far_patrol_point()
+						"air":
+							data.pos = level.random_patrol_point() + Vector3(0, 3.0, 0)
+						_:
+							data.pos = level.random_patrol_point() + Vector3.UP * 0.1
 			_monster_spawner.spawn(data)
 
 
@@ -393,13 +402,27 @@ func _spawn_monster(data: Dictionary) -> Node:
 			child.hide_spots.assign(level.loot_spots)
 			child.rng.seed = data.seed
 			monster = child
-		_:
+		"colossus":
 			var giant := BoilerColossus.new()
 			giant.rng.seed = data.seed
 			giant.patrol_points.assign(level.patrol_points)
 			colossus = giant
 			giant.ready.connect(func() -> void: colossus_spawned.emit(giant), CONNECT_ONE_SHOT)
 			monster = giant
+		_:
+			# Roster-driven monsters: MonsterRoster.MONSTERS[kind].script names the class
+			# file; the usual hand-offs are filled in when the monster has them.
+			monster = load(MonsterRoster.MONSTERS[data.type].script).new()
+			if "patrol_points" in monster:
+				monster.patrol_points.assign(level.patrol_points)
+			if "hide_spots" in monster:
+				monster.hide_spots.assign(level.loot_spots)
+			if "home" in monster:
+				monster.home = data.pos
+			if "level" in monster:
+				monster.level = level
+			if "rng" in monster:
+				monster.rng.seed = data.seed
 	monster.name = data.name
 	monster.position = data.pos
 	monster.set_meta("kind", data.type)
