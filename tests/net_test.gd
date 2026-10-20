@@ -23,6 +23,7 @@ func _run() -> void:
 	GameState.reset()
 	Run.forced_monsters = ["colossus", "mimic"]
 	Run.director_enabled = false
+	Run.forced_map = "factory"
 	_main = load("res://scenes/main.tscn").instantiate()
 	_main.show_menus = false
 	root.add_child(_main)

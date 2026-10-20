@@ -14,6 +14,7 @@ func _run() -> void:
 	GameState.reset()
 	Run.forced_monsters = ["colossus"]
 	Run.director_enabled = false
+	Run.forced_map = "factory"
 	_test_economy()
 	_test_content()
 	await _test_player_basics()
@@ -25,6 +26,7 @@ func _run() -> void:
 	await _test_mimic()
 	await _test_field_control()
 	await _test_director()
+	await _test_maps()
 	print("SMOKE TEST %s (%d failures)" % ["PASSED" if _failures == 0 else "FAILED", _failures])
 	quit(1 if _failures > 0 else 0)
 
@@ -229,6 +231,76 @@ func _test_director() -> void:
 	_check(director.decide() == "gate", "the director slams a gate near a scavenger")
 	GameState.reset()
 	await _end_run(main)
+
+
+func _test_maps() -> void:
+	print("maps")
+	for id in MapRoster.MAPS:
+		Run.forced_map = id
+		var main = await _new_run()
+		var level: GameMap = main.level
+		var player: Player = main.player
+		main.colossus.process_mode = Node.PROCESS_MODE_DISABLED
+		_check(level.map_name != "", "%s: has a name (%s)" % [id, level.map_name])
+		_check(player.is_on_floor(), "%s: player lands on the floor" % id)
+		_check(main.run.loot_root.get_child_count() >= level.loot_count.x, "%s: loot spawns (%d)" % [id, main.run.loot_root.get_child_count()])
+		_check(level.loot_spots.all(func(spot: Vector3) -> bool: return level.in_bounds(spot)), "%s: loot spots are inside the map" % id)
+		_check(level.gates.size() >= 4, "%s: guardian has gates to close (%d)" % [id, level.gates.size()])
+		var nav_map: RID = level.get_world_3d().navigation_map
+		var off_mesh := level.patrol_points.filter(func(point: Vector3) -> bool:
+			return NavigationServer3D.map_get_closest_point(nav_map, point).distance_to(point) > 1.0)
+		_check(off_mesh.is_empty(), "%s: patrol points are on the navmesh %s" % [id, off_mesh])
+		_check(not level.extraction_zone.powered, "%s: exit starts unpowered" % id)
+		main.run._lever_pulled()
+		await _frames(2)
+		_check(level.extraction_zone.powered, "%s: objective powers the exit" % id)
+		match id:
+			"mall":
+				await _test_mall(main, level, player)
+			"station":
+				await _test_station(main, level as ResearchStation, player)
+		await _end_run(main)
+	Run.forced_map = "factory"
+
+
+func _test_mall(_main: Node, level: GameMap, player: Player) -> void:
+	# Walk up the stopped escalator onto the upper floor.
+	player.global_position = Vector3(3.6, 0.1, 8.5)
+	player.rotation.y = PI / 2.0
+	Input.action_press("move_forward")
+	await _frames(240)
+	Input.action_release("move_forward")
+	_check(player.global_position.y > MidnightMall.UPPER_Y - 0.3, "mall: escalator reaches the upper floor (pos=%s)" % player.global_position)
+	# Shutters drop on their own.
+	var mall := level as MidnightMall
+	player.global_position = Vector3(0, 0.1, 20)
+	for attempt in 6:
+		mall._shutter_timer = 0.0
+		await _frames(2)
+	_check(level.gates.any(func(gate: Gate) -> bool: return gate.closed), "mall: a shop shutter rolls down by itself")
+	mall._announce_timer = 0.0
+	await _frames(2)
+	_check(mall._announce_timer > 0.0, "mall: the PA makes an announcement")
+
+
+func _test_station(_main: Node, station: ResearchStation, player: Player) -> void:
+	_check(not station.is_outdoors(station.player_spawn), "station: spawn is indoors")
+	player.global_position = Vector3(0, 0.1, 6)
+	player.velocity = Vector3.ZERO
+	await _frames(5)
+	var start := station.body_heat
+	await _frames(120)
+	_check(station.body_heat < start - 1.0, "station: the cold drains body heat outside (%d -> %d)" % [start, station.body_heat])
+	_check(station.status_text().contains("室外"), "station: HUD shows body heat (%s)" % station.status_text())
+	player.global_position = Vector3(-24.0, 0.1, 0.5)
+	var cold := station.body_heat
+	await _frames(120)
+	_check(station.body_heat > cold + 1.0, "station: a stove warms you back up (%d -> %d)" % [cold, station.body_heat])
+	player.global_position = Vector3(0, 0.1, 6)
+	station.body_heat = 0.0
+	var hp := player.health
+	await _frames(200)
+	_check(player.health < hp, "station: freezing hurts (hp=%d)" % player.health)
 
 
 func _new_run(loadout := {}) -> Node:

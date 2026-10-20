@@ -20,7 +20,7 @@ var guardian_view: GuardianView
 
 var player: Player:
 	get: return run.local_player if run != null else null
-var level: BoilerFactory:
+var level: GameMap:
 	get: return run.level if run != null else null
 var colossus: BoilerColossus:
 	get: return run.colossus if run != null else null
@@ -144,13 +144,13 @@ func _on_run_requested(seed: int, roster: Dictionary) -> void:
 	run.local_finished.connect(_on_local_finished)
 	_viewport.add_child(run)
 
-	run.level.boiler_restarted.connect(func() -> void:
-		hud.show_message("主鍋爐重啟了。升降梯有電了…整座工廠也醒了。", 5.0)
-		hud.set_objective("到升降梯撤離"))
+	run.level.objective_done.connect(func() -> void:
+		hud.show_message(run.level.objective_message, 5.0)
+		hud.set_objective(run.level.exit_text))
 	var zone := run.level.extraction_zone
 	zone.progress_changed.connect(hud.set_extract_progress)
 	zone.extracted.connect(func(_who: Player) -> void: run.local_extracted())
-	zone.blocked.connect(func() -> void: hud.show_message("升降梯沒電。先去重啟主鍋爐。"))
+	zone.blocked.connect(func() -> void: hud.show_message(run.level.blocked_message))
 
 	var post_layer := CanvasLayer.new()
 	var post_rect := ColorRect.new()
@@ -164,7 +164,7 @@ func _on_run_requested(seed: int, roster: Dictionary) -> void:
 
 	run.power_changed.connect(func(on: bool) -> void:
 		if not run.is_guardian:
-			hud.show_message("燈全亮回來了。" if on else "整座工廠斷電了！升降梯也停了…", 4.0))
+			hud.show_message("燈全亮回來了。" if on else "全場斷電了！出口也停了…", 4.0))
 
 	if guardian:
 		hud.visible = false
@@ -174,7 +174,7 @@ func _on_run_requested(seed: int, roster: Dictionary) -> void:
 		add_child(guardian_view)
 		run_active = true
 		return
-	hud.set_objective("重啟主鍋爐（北邊）")
+	hud.set_objective(run.level.objective_text)
 	run_active = true
 	_capture_mouse(true)
 
@@ -182,7 +182,7 @@ func _on_run_requested(seed: int, roster: Dictionary) -> void:
 func _on_local_player_spawned(local: Player) -> void:
 	hud.bind_player(local)
 	var others := session.scavenger_ids().size() - 1
-	var intro := "找值錢的東西。升降梯要先重啟主鍋爐才會動。"
+	var intro := "【%s】%s" % [run.level.map_name, run.level.intro]
 	if others > 0:
 		intro = "這次有 %d 個隊友。%s" % [others, intro]
 	var guardian := session.guardian_id()
@@ -212,9 +212,10 @@ func _process(_delta: float) -> void:
 	if run == null:
 		return
 	hud.set_time_left(run.time_left)
+	hud.set_status(run.level.status_text())
 	if run_active and not _warned and run.time_left <= WARNING_TIME:
 		_warned = true
-		hud.show_message("鍋爐壓力過高！兩分鐘後爆炸！", 5.0)
+		hud.show_message(run.level.warning_message, 5.0)
 	if _spectating != null and not is_instance_valid(_spectating):
 		_spectating = null
 		_spectate_next()

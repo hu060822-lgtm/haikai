@@ -16,7 +16,7 @@ const ABILITIES := {
 	"gate": {"name": "關閘門", "cost": 25.0, "cooldown": 20.0, "duration": 15.0,
 		"desc": "點地圖上的閘門，關上 15 秒。可以把人關在房間裡，或擋住退路。"},
 	"power": {"name": "斷電", "cost": 45.0, "cooldown": 60.0, "duration": 20.0,
-		"desc": "全場燈光熄滅 20 秒，升降梯也停擺。"},
+		"desc": "全場燈光熄滅 20 秒，出口也停擺。"},
 	"monster": {"name": "放出怪物", "cost": 60.0, "cooldown": 45.0, "duration": 0.0,
 		"desc": "在點的位置放出一隻怪物（撲燈蛾 / 擬態蟲 / 假人）。"},
 }
@@ -99,7 +99,7 @@ func use_monster(kind: String, position: Vector3) -> bool:
 
 
 func _valid_release(position: Vector3) -> bool:
-	if absf(position.x) > 15.5 or absf(position.z) > 21.5 or position.y < -0.5 or position.y > 7.0:
+	if not run.level.in_bounds(position):
 		return false
 	for player in run.all_players():
 		if player.is_active() and player.global_position.distance_to(position) < RELEASE_MIN_DISTANCE:

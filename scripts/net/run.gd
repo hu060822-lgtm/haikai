@@ -1,6 +1,6 @@
 class_name Run
 extends Node3D
-## One run of the boiler factory, shared by every peer. Lives at the same node path on
+## One run on a randomly drawn map, shared by every peer. Lives at the same node path on
 ## all machines (Main/RunView/Viewport/World) so its RPCs and spawners line up.
 ## The host owns loot, monsters, the lever and lockers; clients ask it for changes.
 
@@ -20,11 +20,14 @@ static var instance: Run
 static var forced_monsters: Array = []
 ## Tests switch the AI director off so it doesn't meddle.
 static var director_enabled := true
+## Tests pin the map; empty means a random draw (see MapRoster).
+static var forced_map := ""
 
 var seed := 0
 var roster := {}
 var loadout := {}
-var level: BoilerFactory
+var level: GameMap
+var map_id := ""
 var local_player: Player
 var colossus: BoilerColossus
 var monster_kinds: Array[String] = []
@@ -58,7 +61,8 @@ func _exit_tree() -> void:
 
 func _ready() -> void:
 	rng.seed = seed
-	level = BoilerFactory.new()
+	map_id = forced_map if forced_map != "" else MapRoster.pick(seed)
+	level = MapRoster.create(map_id)
 	level.name = "Level"
 	level.rng.seed = seed
 	level.build_navigation = _is_host()
@@ -102,7 +106,7 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	time_left = maxf(time_left - delta, 0.0)
 	if time_left <= 0.0 and local_player != null and local_player.is_active():
-		local_player.die("鍋爐爆炸了，你沒來得及出去")
+		local_player.die(level.timeout_cause)
 	if _is_host():
 		_time_broadcast -= delta
 		if _time_broadcast <= 0.0:
@@ -163,7 +167,7 @@ func _host_spawn_monsters() -> void:
 				"mannequin":
 					data.pos = _far_patrol_point()
 				"moth":
-					data.pos = BoilerFactory.PATROL_POINTS[rng.randi_range(0, BoilerFactory.PATROL_POINTS.size() - 1)] + Vector3(0, 3.0, 0)
+					data.pos = level.random_patrol_point() + Vector3(0, 3.0, 0)
 				"mimic":
 					var spot: Dictionary = spots[serial % spots.size()]
 					data.pos = spot.pos
@@ -243,8 +247,8 @@ func _guardian_ping(pos: Vector3, radius: float) -> void:
 
 ## The patrol point farthest from where players start.
 func _far_patrol_point() -> Vector3:
-	var best: Vector3 = BoilerFactory.PATROL_POINTS[0]
-	for point in BoilerFactory.PATROL_POINTS:
+	var best: Vector3 = level.patrol_points[0]
+	for point in level.patrol_points:
 		if point.distance_to(level.player_spawn) > best.distance_to(level.player_spawn):
 			best = point
 	return best + Vector3.UP * 0.1
@@ -285,7 +289,7 @@ func _spawn_monster(data: Dictionary) -> Node:
 	match data.type:
 		"mannequin":
 			var mannequin := Mannequin.new()
-			mannequin.patrol_points.assign(BoilerFactory.PATROL_POINTS)
+			mannequin.patrol_points.assign(level.patrol_points)
 			mannequin.rng.seed = data.seed
 			monster = mannequin
 		"moth":
@@ -302,7 +306,7 @@ func _spawn_monster(data: Dictionary) -> Node:
 		_:
 			var giant := BoilerColossus.new()
 			giant.rng.seed = data.seed
-			giant.patrol_points.assign(BoilerFactory.PATROL_POINTS)
+			giant.patrol_points.assign(level.patrol_points)
 			colossus = giant
 			giant.ready.connect(func() -> void: colossus_spawned.emit(giant), CONNECT_ONE_SHOT)
 			monster = giant
@@ -383,7 +387,7 @@ func _pull_lever() -> void:
 @rpc("authority", "call_local", "reliable")
 func _lever_pulled() -> void:
 	level.lever.play_pull()
-	level.restart_boiler()
+	level.complete_objective()
 	if _is_host() and colossus != null:
 		colossus.enrage(level.lever.global_position)
 
