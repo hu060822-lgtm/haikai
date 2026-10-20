@@ -25,25 +25,35 @@ func _ready() -> void:
 	surface.rough = true
 	surface.bounce = 0.1
 	physics_material_override = surface
+	# A faceted rubber duck: plump body with an upturned tail, round head, flat orange
+	# bill and two painted eyes. Head and bill face -z, as before.
+	var yellow := PS1Materials.get_material("concrete", Color(1.0, 0.85, 0.1), true)
 	var body := MeshInstance3D.new()
-	var sphere := SphereMesh.new()
-	sphere.radius = 0.12
-	sphere.height = 0.2
-	sphere.radial_segments = 8
-	sphere.rings = 4
-	body.mesh = sphere
-	body.material_override = PS1Materials.get_material("concrete", Color(1.0, 0.85, 0.1), true)
+	body.mesh = LootShapes.with_uvs(LowPoly.merge([
+		[LowPoly.blob(0.12, Vector3(0.85, 0.72, 1.0), 1, 0.03, 3), LowPoly.at(Vector3(0, -0.01, 0.01))],
+		[LowPoly.prism(4, 0.05, 0.0, 0.09), LowPoly.at(Vector3(0, 0.05, 0.11), Vector3(55, 45, 0), Vector3(1.0, 0.6, 1.0))],
+		[LowPoly.blob(0.045, Vector3(0.5, 0.6, 1.2), 0), LowPoly.at(Vector3(0.09, 0.0, 0.02))],
+		[LowPoly.blob(0.045, Vector3(0.5, 0.6, 1.2), 0), LowPoly.at(Vector3(-0.09, 0.0, 0.02))],
+	]), 6.0)
+	body.material_override = yellow
 	add_child(body)
 	var head := MeshInstance3D.new()
-	var small := SphereMesh.new()
-	small.radius = 0.07
-	small.height = 0.14
-	small.radial_segments = 6
-	small.rings = 3
-	head.mesh = small
+	head.mesh = LootShapes.with_uvs(LowPoly.blob(0.07, Vector3(1.0, 1.0, 1.05), 1, 0.02, 1), 6.0)
 	head.position = Vector3(0, 0.12, -0.08)
-	head.material_override = body.material_override
+	head.material_override = yellow
 	add_child(head)
+	var bill := MeshInstance3D.new()
+	bill.mesh = LowPoly.extrude(PackedVector2Array([Vector2(-0.035, 0.0), Vector2(0.035, 0.0), Vector2(0.03, -0.05),
+		Vector2(0.0, -0.06), Vector2(-0.03, -0.05)]), 0.022)
+	bill.rotation.x = PI / 2.0
+	bill.material_override = PS1Materials.get_material("concrete", Color(1.0, 0.45, 0.1), true)
+	head.add_child(bill)
+	bill.position = Vector3(0, -0.015, -0.055)
+	var eyes := MeshInstance3D.new()
+	eyes.mesh = LowPoly.merge([[LowPoly.blob(0.013, Vector3.ONE, 0), LowPoly.at(Vector3(0.035, 0.02, -0.055))],
+		[LowPoly.blob(0.013, Vector3.ONE, 0), LowPoly.at(Vector3(-0.035, 0.02, -0.055))]])
+	eyes.material_override = PS1Materials.get_material("concrete", Color(0.05, 0.05, 0.05), true)
+	head.add_child(eyes)
 	var collider := CollisionShape3D.new()
 	var shape := SphereShape3D.new()
 	shape.radius = 0.12

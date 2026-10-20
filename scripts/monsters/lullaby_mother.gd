@@ -175,21 +175,61 @@ func _nav_ready() -> bool:
 func _build_model() -> void:
 	_model = Node3D.new()
 	add_child(_model)
-	var dress := PS1Materials.get_material("carpet", Color(0.85, 0.78, 0.7), true)
-	var skin := PS1Materials.get_material("concrete", Color(0.95, 0.88, 0.82), true)
-	var hair := PS1Materials.get_material("carpet", Color(0.15, 0.1, 0.08), true)
-	# A long nightgown down to the floor (no feet).
-	MonsterKit.box(_model, Vector3(1.4, 2.2, 1.0), Vector3(0, 1.1, 0), dress)
-	MonsterKit.box(_model, Vector3(1.0, 1.0, 0.7), Vector3(0, 2.7, 0), dress)
-	MonsterKit.box(_model, Vector3(0.2, 0.3, 0.2), Vector3(0, 3.3, 0), skin)
+	var dress := PS1Materials.get_material("carpet", Color(0.85, 0.78, 0.7))
+	var skin := PS1Materials.get_material("concrete", Color(0.95, 0.88, 0.82))
+	var hair := PS1Materials.get_material("carpet", Color(0.15, 0.1, 0.08))
+	var trim := PS1Materials.get_material("concrete", Color(0.8, 0.72, 0.66))
+	# A long pleated nightgown down to the floor (no feet): it flares at the hem,
+	# pinches at the waist and closes over narrow shoulders.
+	var gown := PackedVector2Array([Vector2(0.0, 0.0), Vector2(0.8, 0.0), Vector2(0.76, 0.35),
+		Vector2(0.64, 1.1), Vector2(0.52, 1.8), Vector2(0.42, 2.3), Vector2(0.5, 2.7),
+		Vector2(0.52, 2.95), Vector2(0.36, 3.18), Vector2(0.12, 3.28), Vector2(0.0, 3.3)])
+	MonsterKit.part(_model, _pleated_lathe(gown, 12, 0.07, 1.0, 2.3), Vector3.ZERO, dress, Vector3.ZERO, Vector3(1.0, 1.0, 0.75))
+	# Ruffled hem, a sash at the waist and a high collar.
+	MonsterKit.part(_model, _pleated_lathe(PackedVector2Array([Vector2(0.84, 0.0), Vector2(0.88, 0.1),
+		Vector2(0.8, 0.2)]), 12, 0.06, 0.0, 0.2), Vector3.ZERO, trim, Vector3.ZERO, Vector3(1.0, 1.0, 0.75))
+	MonsterKit.part(_model, LowPoly.prism(10, 0.46, 0.45, 0.12), Vector3(0, 2.32, 0), trim, Vector3.ZERO, Vector3(1.0, 1.0, 0.75))
+	MonsterKit.part(_model, LowPoly.prism(8, 0.2, 0.14, 0.16), Vector3(0, 3.25, 0), trim)
+	# A long thin neck.
+	MonsterKit.part(_model, LowPoly.prism(6, 0.1, 0.08, 0.36), Vector3(0, 3.38, 0), skin)
 	_head = Node3D.new()
 	_head.position = Vector3(0, 3.45, 0)
 	_model.add_child(_head)
-	# A smooth face with nothing on it, under long hair.
-	MonsterKit.sphere(_head, 0.32, Vector3(0, 0.3, 0), skin, Vector3(0.9, 1.2, 0.95))
-	MonsterKit.box(_head, Vector3(0.7, 0.9, 0.5), Vector3(0, 0.25, 0.15), hair)
+	# A smooth face with nothing on it, framed by long hair that falls down her back.
+	MonsterKit.part(_head, LowPoly.blob(0.32, Vector3(0.9, 1.2, 0.95), 1, 0.03, 21), Vector3(0, 0.3, -0.02), skin)
+	MonsterKit.part(_head, LowPoly.blob(0.35, Vector3(0.95, 1.12, 0.9), 1, 0.06, 22), Vector3(0, 0.36, 0.1), hair)
+	var strands := []
+	for i in 5:
+		var a := lerpf(-1.9, 1.9, i / 4.0)
+		var top := Vector3(sin(a) * 0.28, 0.4, cos(a) * 0.24 + 0.08)
+		var sway := sin(i * 1.7) * 0.06
+		var fall := 1.0 - absf(a) * 0.25
+		strands.append([LowPoly.tube(PackedVector3Array([top, top + Vector3(sin(a) * 0.08 + sway, -0.45, cos(a) * 0.08),
+			top + Vector3(sin(a) * 0.12 - sway, -0.95 * fall, cos(a) * 0.1 + 0.04),
+			top + Vector3(sin(a) * 0.1, -1.35 * fall, cos(a) * 0.12 + 0.02)]),
+			PackedFloat32Array([0.12, 0.1, 0.07, 0.0]), 4), LowPoly.at(Vector3.ZERO, Vector3.ZERO, Vector3(1.0, 1.0, 0.6))])
+	MonsterKit.part(_head, LowPoly.merge(strands), Vector3.ZERO, hair)
 	for side in [-1.0, 1.0]:
-		_arms.append(MonsterKit.limb(_model, Vector3(0.6 * side, 3.1, 0), Vector3(0.18, 1.6, 0.18), skin))
+		var arm := Node3D.new()
+		arm.position = Vector3(0.6 * side, 3.1, 0)
+		_model.add_child(arm)
+		# Shoulder, a bell sleeve and a long pale hand with too-long fingers.
+		MonsterKit.part(arm, LowPoly.blob(0.2, Vector3(1.0, 0.85, 1.0), 0, 0.05, 23), Vector3(-0.04 * side, 0.02, 0), dress)
+		MonsterKit.part(arm, LowPoly.lathe(PackedVector2Array([Vector2(0.0, 0.0), Vector2(0.15, -0.05),
+			Vector2(0.14, -0.45), Vector2(0.17, -0.85), Vector2(0.24, -1.05), Vector2(0.2, -1.1), Vector2(0.0, -1.1)]), 7), Vector3.ZERO, dress)
+		MonsterKit.part(arm, LowPoly.prism(6, 0.07, 0.08, 0.4), Vector3(0, -1.15, 0), skin)
+		MonsterKit.part(arm, LowPoly.chamfer_box(Vector3(0.18, 0.2, 0.08), 0.03), Vector3(0, -1.42, 0), skin)
+		var fingers := []
+		for k in 3:
+			var x := (k - 1.0) * 0.06
+			var base := Vector3(x, -1.5, 0.0)
+			fingers.append([LowPoly.tube(PackedVector3Array([base, base + Vector3(x * 0.3, -0.12, -0.02),
+				base + Vector3(x * 0.4, -0.24 + absf(k - 1.0) * 0.03, 0.02)]),
+				PackedFloat32Array([0.026, 0.02, 0.0]), 3), Transform3D.IDENTITY])
+		fingers.append([LowPoly.tube(PackedVector3Array([Vector3(side * 0.08, -1.4, -0.02), Vector3(side * 0.12, -1.5, -0.06),
+			Vector3(side * 0.1, -1.6, -0.08)]), PackedFloat32Array([0.025, 0.018, 0.0]), 3), Transform3D.IDENTITY])
+		MonsterKit.part(arm, LowPoly.merge(fingers), Vector3.ZERO, skin)
+		_arms.append(arm)
 	# The warmth: a soft orange glow around her.
 	var warm := OmniLight3D.new()
 	warm.position = Vector3(0, 2.0, 0)
@@ -205,3 +245,32 @@ func _build_model() -> void:
 	_song.autoplay = true
 	_song.position = Vector3(0, 3.0, 0)
 	add_child(_song)
+
+
+## A lathe whose rings push in and out around the axis, like cloth hanging in folds.
+## The folds are deepest at `deep_y` and fade out by `flat_y`.
+static func _pleated_lathe(profile: PackedVector2Array, sides: int, depth: float, deep_y: float, flat_y: float) -> ArrayMesh:
+	var bent := PackedVector2Array()
+	var rings: Array = []
+	for p in profile:
+		var fold := depth * clampf((flat_y - p.y) / maxf(flat_y - deep_y, 0.001), 0.0, 1.0) if deep_y < flat_y \
+			else depth * clampf((p.y - flat_y) / maxf(deep_y - flat_y, 0.001), 0.0, 1.0)
+		var ring: Array[Vector3] = []
+		for s in sides:
+			var t := TAU * s / sides
+			var r := p.x + (fold if s % 2 == 0 else -fold * 0.5) if p.x > 0.0001 else 0.0
+			ring.append(Vector3(cos(t) * r, p.y, sin(t) * r))
+		rings.append(ring)
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in profile.size() - 1:
+		var centre := Vector3(0, (profile[i].y + profile[i + 1].y) / 2.0, 0)
+		for s in sides:
+			var n := (s + 1) % sides
+			var a: Vector3 = rings[i][s]
+			var b: Vector3 = rings[i][n]
+			var c: Vector3 = rings[i + 1][n]
+			var d: Vector3 = rings[i + 1][s]
+			LowPoly._tri_outward(st, a, b, c, centre)
+			LowPoly._tri_outward(st, a, c, d, centre)
+	return st.commit()

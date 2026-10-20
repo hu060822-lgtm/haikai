@@ -241,30 +241,92 @@ func _build_model() -> void:
 	var body := Node3D.new()
 	body.name = "Body"
 	add_child(body)
-	var suit := PS1Materials.get_material("carpet", Color(0.2, 0.2, 0.28), true)
-	var shirt := PS1Materials.get_material("concrete", Color(0.95, 0.95, 0.92), true)
-	var skin := PS1Materials.get_material("concrete", Color(0.98, 0.9, 0.85), true)
-	var black := PS1Materials.get_material("concrete", Color(0.05, 0.03, 0.03), true)
-	var red := PS1Materials.get_material("concrete", Color(0.3, 0.0, 0.0), true, Vector2.ONE, Color(0.9, 0.05, 0.02))
-	for side in [-1.0, 1.0]:
-		MonsterKit.limb(body, Vector3(0.11 * side, 0.85, 0), Vector3(0.14, 0.85, 0.16), suit)
-		var arm := MonsterKit.limb(body, Vector3(0.28 * side, 1.5, 0), Vector3(0.1, 0.66, 0.12), suit)
-		arm.rotation.x = -0.35  # hands clasped in front, the way staff are taught
-	MonsterKit.box(body, Vector3(0.46, 0.68, 0.26), Vector3(0, 1.2, 0), suit)
-	MonsterKit.box(body, Vector3(0.16, 0.5, 0.02), Vector3(0, 1.3, -0.135), shirt)
-	MonsterKit.box(body, Vector3(0.12, 0.06, 0.03), Vector3(0, 1.52, -0.14), red)  # bow tie
+	var suit := PS1Materials.get_material("carpet", Color(0.2, 0.2, 0.28))
+	var lapel := PS1Materials.get_material("carpet", Color(0.12, 0.12, 0.18))
+	var shirt := PS1Materials.get_material("concrete", Color(0.95, 0.95, 0.92))
+	var skin := PS1Materials.get_material("concrete", Color(0.98, 0.9, 0.85))
+	var black := PS1Materials.get_material("concrete", Color(0.05, 0.03, 0.03))
+	var hair := PS1Materials.get_material("concrete", Color(0.1, 0.08, 0.07))
+	var brass := PS1Materials.get_material("brass", Color(1.0, 0.9, 0.6))
+	var red := PS1Materials.get_material("concrete", Color(0.3, 0.0, 0.0), false, Vector2.ONE, Color(0.9, 0.05, 0.02))
+	# Pressed trousers and polished shoes.
+	var shoe := PackedVector2Array([Vector2(-0.07, 0.0), Vector2(0.16, 0.0), Vector2(0.19, 0.025),
+		Vector2(0.15, 0.07), Vector2(0.04, 0.09), Vector2(-0.07, 0.09)])
+	for side: float in [-1.0, 1.0]:
+		var leg := Node3D.new()
+		leg.position = Vector3(0.11 * side, 0.85, 0)
+		body.add_child(leg)
+		MonsterKit.part(leg, LowPoly.tube(PackedVector3Array([Vector3(0, 0.03, 0), Vector3(0, -0.4, -0.01),
+			Vector3(0, -0.79, 0)]), PackedFloat32Array([0.09, 0.075, 0.066]), 6), Vector3.ZERO, suit)
+		MonsterKit.part(leg, LowPoly.extrude(shoe, 0.105), Vector3(0, -0.85, 0), black, Vector3(0, 90, 0))
+	# The jacket: one lathed shell, squared at the shoulders and nipped at the waist.
+	var jacket := PackedVector2Array([Vector2(0.0, 0.8), Vector2(0.2, 0.8), Vector2(0.215, 0.95),
+		Vector2(0.2, 1.08), Vector2(0.235, 1.3), Vector2(0.255, 1.44), Vector2(0.24, 1.54),
+		Vector2(0.12, 1.6), Vector2(0.0, 1.62)])
+	MonsterKit.part(body, LowPoly.lathe(jacket, 8), Vector3.ZERO, suit, Vector3(0, 22.5, 0), Vector3(1, 1, 0.62))
+	for side: float in [-1.0, 1.0]:
+		MonsterKit.part(body, LowPoly.blob(0.085, Vector3(1.1, 0.65, 1.0), 0), Vector3(0.22 * side, 1.5, 0), suit)
+	# Shirt front in the V of the lapels, the bow tie, buttons and a brass name badge.
+	var vee := PackedVector2Array([Vector2(-0.085, 0.0), Vector2(0.085, 0.0), Vector2(0.0, -0.32)])
+	MonsterKit.part(body, LowPoly.extrude(vee, 0.02), Vector3(0, 1.56, -0.142), shirt)
+	for side: float in [-1.0, 1.0]:
+		var flap := PackedVector2Array([Vector2(0.085 * side, 0.0), Vector2(0.125 * side, -0.03),
+			Vector2(0.03 * side, -0.33), Vector2(0.0, -0.32)])
+		MonsterKit.part(body, LowPoly.extrude(flap, 0.02), Vector3(0, 1.56, -0.15), lapel)
+	var bow := PackedVector2Array([Vector2(-0.075, 0.04), Vector2(0.0, 0.01), Vector2(0.075, 0.04),
+		Vector2(0.075, -0.04), Vector2(0.0, -0.01), Vector2(-0.075, -0.04)])
+	MonsterKit.part(body, LowPoly.extrude(bow, 0.03), Vector3(0, 1.53, -0.168), red)
+	MonsterKit.part(body, LowPoly.blob(0.02, Vector3.ONE, 0), Vector3(0, 1.53, -0.18), red)
+	for y: float in [1.17, 1.06]:
+		MonsterKit.part(body, LowPoly.prism(6, 0.016, 0.016, 0.012), Vector3(0, y, -0.128), black, Vector3(90, 0, 0))
+	MonsterKit.part(body, LowPoly.chamfer_box(Vector3(0.075, 0.028, 0.012), 0.004), Vector3(-0.105, 1.35, -0.135), brass, Vector3(0, -12, 0))
+	# Arms bent at the elbow, white-gloved hands clasped in front, the way staff are taught.
+	for side: float in [-1.0, 1.0]:
+		var arm := Node3D.new()
+		arm.position = Vector3(0.28 * side, 1.5, 0)
+		body.add_child(arm)
+		MonsterKit.part(arm, LowPoly.tube(PackedVector3Array([Vector3(0, 0.02, 0), Vector3(0.01 * side, -0.3, 0.03),
+			Vector3(-0.17 * side, -0.49, -0.16)]), PackedFloat32Array([0.068, 0.058, 0.05]), 6), Vector3.ZERO, suit)
+		MonsterKit.part(arm, LowPoly.prism(6, 0.042, 0.042, 0.035), Vector3(-0.19 * side, -0.505, -0.175), shirt, Vector3(50, 0, -40 * side))
+		MonsterKit.part(arm, LowPoly.blob(0.056, Vector3(0.85, 1.0, 1.15), 0), Vector3(-0.23 * side, -0.53, -0.2), shirt)
 	# A head a little too big, with a smile a little too wide.
-	MonsterKit.sphere(body, 0.19, Vector3(0, 1.78, 0), skin, Vector3(1.05, 1.15, 1.0))
-	for side in [-1.0, 1.0]:
-		MonsterKit.box(body, Vector3(0.05, 0.015, 0.02), Vector3(0.07 * side, 1.84, -0.185), black)
+	MonsterKit.part(body, LowPoly.prism(6, 0.075, 0.07, 0.05), Vector3(0, 1.59, 0), shirt)
+	MonsterKit.part(body, LowPoly.prism(6, 0.058, 0.054, 0.1), Vector3(0, 1.64, 0), skin)
+	var head := PackedVector2Array([Vector2(0.0, -0.2), Vector2(0.08, -0.19), Vector2(0.15, -0.14),
+		Vector2(0.195, -0.05), Vector2(0.205, 0.04), Vector2(0.19, 0.12), Vector2(0.14, 0.19),
+		Vector2(0.07, 0.225), Vector2(0.0, 0.235)])
+	MonsterKit.part(body, LowPoly.lathe(head, 10), Vector3(0, 1.79, 0), skin, Vector3(0, 18, 0), Vector3(1, 1, 0.95))
+	var cap := PackedVector2Array([Vector2(0.212, 0.0), Vector2(0.208, 0.07), Vector2(0.162, 0.15),
+		Vector2(0.088, 0.205), Vector2(0.0, 0.222)])
+	MonsterKit.part(body, LowPoly.lathe(cap, 10), Vector3(0, 1.815, 0.012), hair, Vector3(16, 18, 0), Vector3(1, 1, 0.97))
+	for side: float in [-1.0, 1.0]:
+		MonsterKit.part(body, LowPoly.blob(0.04, Vector3(0.4, 1.0, 0.7), 0), Vector3(0.2 * side, 1.8, 0.01), skin)
+	MonsterKit.part(body, LowPoly.blob(0.026, Vector3(0.8, 1.0, 1.0), 0), Vector3(0, 1.78, -0.198), skin)
 	_smile = Node3D.new()
 	body.add_child(_smile)
-	for i in 7:
-		var x := (i - 3) * 0.035
-		MonsterKit.box(_smile, Vector3(0.04, 0.02, 0.02), Vector3(x, 1.7 + absf(x) * 0.9, -0.19), black)
+	# Happy, closed eyes and a grin that runs nearly ear to ear.
+	for side: float in [-1.0, 1.0]:
+		var lid := PackedVector3Array()
+		for i in 5:
+			var x := 0.07 * side + (i - 2) * 0.018
+			lid.append(_on_face(x, 1.855 + 0.02 - absf(i - 2) * absf(i - 2) * 0.006))
+		MonsterKit.part(_smile, LowPoly.tube(lid, PackedFloat32Array([0.006, 0.009, 0.01, 0.009, 0.006]), 4), Vector3.ZERO, black)
+	var grin := PackedVector3Array()
+	var grin_r := PackedFloat32Array()
+	for i in 11:
+		var x := (i - 5) * 0.03
+		grin.append(_on_face(x, 1.695 + x * x * 3.2))
+		grin_r.append(0.017 - absf(i - 5) * 0.0018)
+	MonsterKit.part(_smile, LowPoly.tube(grin, grin_r, 4), Vector3.ZERO, black)
 	_scream = Node3D.new()
 	body.add_child(_scream)
-	MonsterKit.box(_scream, Vector3(0.22, 0.18, 0.03), Vector3(0, 1.7, -0.19), red)
-	for side in [-1.0, 1.0]:
-		MonsterKit.box(_scream, Vector3(0.07, 0.05, 0.02), Vector3(0.07 * side, 1.84, -0.19), red)
+	MonsterKit.part(_scream, LowPoly.blob(0.1, Vector3(0.95, 1.05, 0.4), 1, 0.12, 3), Vector3(0, 1.7, -0.165), red)
+	for side: float in [-1.0, 1.0]:
+		MonsterKit.part(_scream, LowPoly.blob(0.04, Vector3(1.2, 0.85, 0.45), 0), Vector3(0.07 * side, 1.85, -0.183), red)
 	_scream.visible = false
+
+
+## A point just proud of the front of the head (centred at y 1.79, radius ~0.2).
+static func _on_face(x: float, y: float) -> Vector3:
+	var r := 0.205 - maxf(1.79 - y, 0.0) * 0.45
+	return Vector3(x, y, -sqrt(maxf(r * r - x * x, 0.0)) * 0.95 - 0.004)

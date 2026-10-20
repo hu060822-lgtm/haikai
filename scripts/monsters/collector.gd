@@ -251,26 +251,119 @@ func _apply_load() -> void:
 
 
 func _build_model() -> void:
-	var coat := PS1Materials.get_material("carpet", Color(0.35, 0.32, 0.25), true)
-	var skin := PS1Materials.get_material("concrete", Color(0.6, 0.62, 0.55), true)
-	var metal := PS1Materials.get_material("grate", Color(0.7, 0.7, 0.7), true)
-	# A stooped body in a long coat, head hanging low.
-	for side in [-1.0, 1.0]:
-		MonsterKit.limb(self, Vector3(0.12 * side, 0.8, 0.15), Vector3(0.13, 0.8, 0.13), coat)
-		var arm := MonsterKit.limb(self, Vector3(0.25 * side, 1.35, 0), Vector3(0.09, 0.7, 0.09), skin)
-		arm.rotation.x = -1.0
-	var torso := MonsterKit.box(self, Vector3(0.5, 0.75, 0.32), Vector3(0, 1.2, 0.05), coat)
-	torso.rotation.x = -0.45
-	MonsterKit.sphere(self, 0.16, Vector3(0, 1.45, -0.32), skin, Vector3(0.9, 1.1, 1.0))
-	# The cart in front of it.
-	MonsterKit.box(self, Vector3(0.7, 0.5, 0.9), Vector3(0, 0.75, -1.0), metal)
-	MonsterKit.box(self, Vector3(0.6, 0.04, 0.04), Vector3(0, 1.05, -0.5), metal)
-	for corner in [Vector3(-0.3, 0.12, -0.6), Vector3(0.3, 0.12, -0.6), Vector3(-0.3, 0.12, -1.4), Vector3(0.3, 0.12, -1.4)]:
-		MonsterKit.sphere(self, 0.1, corner, skin)
-	for x in [-0.45, -0.25, -0.05]:
-		MonsterKit.box(self, Vector3(0.02, 0.5, 0.02), Vector3(x + 0.25, 0.5, -0.6), metal)
+	var coat := PS1Materials.get_material("carpet", Color(0.35, 0.32, 0.25))
+	var patch := PS1Materials.get_material("carpet", Color(0.24, 0.22, 0.17))
+	var skin := PS1Materials.get_material("concrete", Color(0.6, 0.62, 0.55))
+	var dark := PS1Materials.get_material("concrete", Color(0.04, 0.04, 0.03))
+	var boot := PS1Materials.get_material("concrete", Color(0.18, 0.13, 0.09))
+	var metal := PS1Materials.get_material("grate", Color(0.7, 0.7, 0.7))
+	var frame := PS1Materials.get_material("rust_metal", Color(0.75, 0.72, 0.68))
+	var rubber := PS1Materials.get_material("concrete", Color(0.1, 0.1, 0.1))
+	# Bent legs in baggy trousers and split boots, under the coat.
+	var boot_outline := PackedVector2Array([Vector2(-0.08, 0.0), Vector2(0.16, 0.0), Vector2(0.17, 0.05),
+		Vector2(0.08, 0.1), Vector2(0.02, 0.17), Vector2(-0.07, 0.17)])
+	for side: float in [-1.0, 1.0]:
+		var leg := Node3D.new()
+		leg.position = Vector3(0.12 * side, 0.8, 0.15)
+		add_child(leg)
+		MonsterKit.part(leg, LowPoly.tube(PackedVector3Array([Vector3(0, 0.05, 0), Vector3(0.01 * side, -0.38, -0.09),
+			Vector3(0, -0.7, 0.0)]), PackedFloat32Array([0.085, 0.075, 0.062]), 6), Vector3.ZERO, patch)
+		MonsterKit.part(leg, LowPoly.extrude(boot_outline, 0.12), Vector3(0, -0.8, 0.02), boot, Vector3(0, 90 + 8 * side, 0))
+	# A long coat: the skirt hangs from the hips, the upper body bends over the cart.
+	var skirt := PackedVector2Array([Vector2(0.3, -0.58), Vector2(0.26, -0.3), Vector2(0.21, 0.0)])
+	MonsterKit.part(self, LowPoly.lathe(skirt, 7, 0.12), Vector3(0, 0.93, 0.1), coat, Vector3(-6, 0, 0), Vector3(1, 1, 0.85))
+	var torso := Node3D.new()
+	torso.position = Vector3(0, 0.9, 0.1)
+	torso.rotation.x = -0.5
+	add_child(torso)
+	var chest := PackedVector2Array([Vector2(0.0, -0.02), Vector2(0.21, 0.0), Vector2(0.24, 0.25),
+		Vector2(0.27, 0.45), Vector2(0.22, 0.58), Vector2(0.1, 0.64), Vector2(0.0, 0.65)])
+	MonsterKit.part(torso, LowPoly.lathe(chest, 7), Vector3.ZERO, coat, Vector3.ZERO, Vector3(1, 1, 0.75))
+	# The hump, a patched elbow of cloth on the back, a belt of rope.
+	MonsterKit.part(torso, LowPoly.blob(0.2, Vector3(1.15, 0.9, 0.8), 0, 0.15, 7), Vector3(0, 0.44, 0.1), coat)
+	MonsterKit.part(torso, LowPoly.chamfer_box(Vector3(0.16, 0.14, 0.03), 0.01), Vector3(0.06, 0.36, 0.22), patch, Vector3(-10, 0, 9))
+	MonsterKit.part(torso, LowPoly.prism(7, 0.225, 0.225, 0.04), Vector3(0, 0.04, 0), boot, Vector3.ZERO, Vector3(1, 1, 0.78))
+	# A scarf wound round the neck, and the head hanging low, a flat cap pulled down.
+	MonsterKit.part(torso, LowPoly.prism(7, 0.14, 0.11, 0.1), Vector3(0, 0.62, -0.04), patch)
+	MonsterKit.part(self, LowPoly.tube(PackedVector3Array([Vector3(0, 1.42, -0.18), Vector3(0, 1.43, -0.26),
+		Vector3(0, 1.4, -0.31)]), PackedFloat32Array([0.055, 0.05, 0.05]), 6), Vector3.ZERO, skin)
+	var head := Node3D.new()
+	head.position = Vector3(0, 1.4, -0.35)
+	head.rotation.x = -0.45
+	add_child(head)
+	MonsterKit.part(head, LowPoly.blob(0.15, Vector3(0.85, 1.05, 0.95), 1, 0.1, 11), Vector3.ZERO, skin)
+	MonsterKit.part(head, LowPoly.blob(0.06, Vector3(1.1, 0.8, 1.0), 0, 0.1, 2), Vector3(0, -0.11, -0.06), skin)
+	for side: float in [-1.0, 1.0]:
+		MonsterKit.part(head, LowPoly.blob(0.03, Vector3(1.2, 0.8, 0.6), 0), Vector3(0.05 * side, 0.0, -0.13), dark)
+		MonsterKit.part(head, LowPoly.blob(0.035, Vector3(0.4, 1.0, 0.7), 0), Vector3(0.13 * side, 0.0, 0.0), skin)
+	MonsterKit.part(head, LowPoly.prism(8, 0.135, 0.125, 0.07), Vector3(0, 0.09, 0.0), patch, Vector3.ZERO, Vector3(1, 1, 1.05))
+	MonsterKit.part(head, LowPoly.prism(8, 0.11, 0.11, 0.015), Vector3(0, 0.06, -0.12), patch, Vector3(-8, 0, 0), Vector3(1.3, 1, 0.9))
+	# Long arms reaching down to the handle, bony fingers wrapped round it.
+	for side: float in [-1.0, 1.0]:
+		MonsterKit.part(self, LowPoly.tube(PackedVector3Array([Vector3(0.25 * side, 1.34, -0.1), Vector3(0.33 * side, 1.13, -0.24),
+			Vector3(0.3 * side, 1.07, -0.4)]), PackedFloat32Array([0.075, 0.062, 0.055]), 6), Vector3.ZERO, coat)
+		MonsterKit.part(self, LowPoly.tube(PackedVector3Array([Vector3(0.3 * side, 1.07, -0.39), Vector3(0.29 * side, 1.07, -0.47)]),
+			PackedFloat32Array([0.038, 0.032]), 5), Vector3.ZERO, skin)
+		MonsterKit.part(self, LowPoly.blob(0.045, Vector3(1.0, 0.75, 1.1), 0), Vector3(0.28 * side, 1.08, -0.49), skin)
+		for f in 3:
+			var x := (0.25 + 0.025 * f) * side
+			MonsterKit.part(self, LowPoly.tube(PackedVector3Array([Vector3(x, 1.09, -0.48), Vector3(x, 1.085, -0.53),
+				Vector3(x, 1.035, -0.535)]), PackedFloat32Array([0.012, 0.011, 0.008]), 3), Vector3.ZERO, skin)
+	_build_cart(metal, frame, rubber)
 	# Junk piled in the cart, shown as it fills.
+	var junk_meshes := [
+		LowPoly.chamfer_box(Vector3(0.24, 0.18, 0.2), 0.03),
+		LowPoly.lathe(PackedVector2Array([Vector2(0.0, -0.13), Vector2(0.06, -0.13), Vector2(0.065, 0.02),
+			Vector2(0.025, 0.07), Vector2(0.022, 0.13), Vector2(0.0, 0.13)]), 6),
+		LowPoly.prism(8, 0.075, 0.075, 0.17),
+		LowPoly.blob(0.13, Vector3(1.0, 0.75, 0.9), 1, 0.22, 5),
+		LowPoly.merge([[LowPoly.chamfer_box(Vector3(0.24, 0.14, 0.1), 0.02), Transform3D.IDENTITY],
+			[LowPoly.prism(6, 0.006, 0.006, 0.2), LowPoly.at(Vector3(0.08, 0.15, 0), Vector3(0, 0, -15))]]),
+		LowPoly.lathe(PackedVector2Array([Vector2(0.0, -0.1), Vector2(0.06, -0.1), Vector2(0.1, 0.0),
+			Vector2(0.07, 0.08), Vector2(0.09, 0.11), Vector2(0.0, 0.11)]), 7),
+	]
+	var junk_rot := [Vector3(0, 12, 0), Vector3(0, 0, 70), Vector3(15, 0, 0), Vector3(0, 40, 0), Vector3(-12, -25, 0), Vector3(0, 0, -20)]
 	for i in 6:
-		var junk := MonsterKit.box(self, Vector3(0.22, 0.18, 0.2), Vector3(-0.18 + (i % 3) * 0.18, 1.05 + (i / 3) * 0.17, -1.0 + (i % 2) * 0.2),
-			PS1Materials.get_material("brass", Color.from_hsv(i * 0.17, 0.5, 0.8), true))
+		var junk := MonsterKit.part(self, junk_meshes[i], Vector3(-0.18 + (i % 3) * 0.18, 0.98 + (i / 3) * 0.16, -1.0 + (i % 2) * 0.2),
+			PS1Materials.get_material("brass", Color.from_hsv(i * 0.17, 0.5, 0.8)), junk_rot[i])
 		_cart_pile.append(junk)
+
+
+## A battered shopping cart in front of it: wire basket, push bar, crooked castors.
+func _build_cart(metal: Material, frame: Material, rubber: Material) -> void:
+	MonsterKit.part(self, _panel(Vector3(0.6, 0.03, 0.8)), Vector3(0, 0.52, -1.0), metal)
+	for side: float in [-1.0, 1.0]:
+		MonsterKit.part(self, _panel(Vector3(0.025, 0.48, 0.88)), Vector3(0.33 * side, 0.76, -1.0), metal, Vector3(0, 0, -7 * side))
+	MonsterKit.part(self, _panel(Vector3(0.7, 0.48, 0.025)), Vector3(0, 0.76, -0.57), metal, Vector3(-7, 0, 0))
+	MonsterKit.part(self, _panel(Vector3(0.7, 0.48, 0.025)), Vector3(0, 0.76, -1.43), metal, Vector3(7, 0, 0))
+	# Tubular rim round the top of the basket.
+	var rim := PackedVector3Array([Vector3(-0.36, 1.0, -0.54), Vector3(0.36, 1.0, -0.54), Vector3(0.36, 1.0, -1.46),
+		Vector3(-0.36, 1.0, -1.46), Vector3(-0.36, 1.0, -0.54)])
+	MonsterKit.part(self, LowPoly.tube(rim, PackedFloat32Array([0.018, 0.018, 0.018, 0.018, 0.018]), 5), Vector3.ZERO, frame)
+	# The push bar with its rubber grips, braced down to the basket.
+	MonsterKit.part(self, LowPoly.prism(6, 0.022, 0.022, 0.68), Vector3(0, 1.05, -0.5), frame, Vector3(0, 0, 90))
+	for side: float in [-1.0, 1.0]:
+		MonsterKit.part(self, LowPoly.prism(6, 0.03, 0.03, 0.13), Vector3(0.27 * side, 1.05, -0.5), rubber, Vector3(0, 0, 90))
+		MonsterKit.part(self, LowPoly.tube(PackedVector3Array([Vector3(0.34 * side, 1.05, -0.5), Vector3(0.36 * side, 1.0, -0.55),
+			Vector3(0.3 * side, 0.52, -0.6), Vector3(0.27 * side, 0.2, -0.6)]), PackedFloat32Array([0.018, 0.018, 0.018, 0.018]), 5), Vector3.ZERO, frame)
+		MonsterKit.part(self, LowPoly.tube(PackedVector3Array([Vector3(0.3 * side, 0.52, -1.4), Vector3(0.27 * side, 0.2, -1.4)]),
+			PackedFloat32Array([0.018, 0.018]), 5), Vector3.ZERO, frame)
+		MonsterKit.part(self, LowPoly.tube(PackedVector3Array([Vector3(0.27 * side, 0.2, -0.6), Vector3(0.27 * side, 0.2, -1.4)]),
+			PackedFloat32Array([0.02, 0.02]), 5), Vector3.ZERO, frame)
+	# The bottom tray, and four castors, one of them twisted (that's the squeak).
+	MonsterKit.part(self, _panel(Vector3(0.52, 0.02, 0.7)), Vector3(0, 0.23, -1.0), metal)
+	var twist := [0.0, 0.0, 0.0, 28.0]
+	var corners := [Vector3(-0.27, 0.12, -0.6), Vector3(0.27, 0.12, -0.6), Vector3(-0.27, 0.12, -1.4), Vector3(0.27, 0.12, -1.4)]
+	for i in 4:
+		var castor := Node3D.new()
+		castor.position = corners[i]
+		castor.rotation_degrees.y = twist[i]
+		add_child(castor)
+		MonsterKit.part(castor, _panel(Vector3(0.07, 0.1, 0.03)), Vector3(0, 0.06, 0), frame)
+		MonsterKit.part(castor, LowPoly.prism(8, 0.1, 0.1, 0.05), Vector3(0, -0.02, 0.02), rubber, Vector3(0, 0, 90))
+
+
+## A flat sheet with square edges (12 triangles): the cart's wire panels and tray.
+static func _panel(size: Vector3) -> ArrayMesh:
+	var h := size / 2.0
+	return LowPoly.extrude(PackedVector2Array([Vector2(-h.x, -h.y), Vector2(h.x, -h.y), Vector2(h.x, h.y), Vector2(-h.x, h.y)]), size.z)

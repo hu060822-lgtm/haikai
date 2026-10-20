@@ -38,7 +38,7 @@ const PATROL_POINTS := [
 	Vector3(0, 0, -6), Vector3(-3.5, 0, 3), Vector3(5, 0, 2), Vector3(0, 0, 7),
 	Vector3(-9, 0, -12), Vector3(9, 0, -12), Vector3(-9, 0, 10), Vector3(9, 0, 10),
 	Vector3(0, 0, 18), Vector3(-10, 0, 21), Vector3(10, 0, 21), Vector3(0, 0, -21),
-	Vector3(-12, 0, -21), Vector3(8, 0, -21),
+	Vector3(-12, 0, -21), Vector3(6, 0, -21),
 ]
 
 const ANNOUNCEMENTS := [
@@ -75,6 +75,7 @@ func build() -> void:
 	overview_height = ROOF_Y - 0.5
 	_speakers.assign([Vector3(0, 8, 0), Vector3(-12, 4, -21), Vector3(0, 4, 20), Vector3(13, 8, 4)])
 	_environment(Color(0.015, 0.012, 0.02), Color(0.32, 0.27, 0.38), 0.55, Color(0.06, 0.045, 0.07), 0.04, "drone", -18.0)
+	_plan_wings()
 	_build_shell()
 	_build_atrium()
 	_build_upper_floor()
@@ -83,6 +84,7 @@ func build() -> void:
 	_build_upper_rooms()
 	_build_staff_area()
 	_build_lights()
+	_build_wings()
 
 
 func _process(delta: float) -> void:
@@ -133,14 +135,55 @@ func _on_objective() -> void:
 		board.visible = true
 
 
+## Back-of-house wings off both ends of the loading dock, and the car park out front.
+func _plan_wings() -> void:
+	var back := {"clutter": "backroom", "floor": "tile", "floor_tint": Color(0.62, 0.62, 0.6), "wall": "concrete", "wall_tint": Color(0.72, 0.7, 0.66),
+		"inner_wall": "panel", "roof": "panel", "roof_tint": Color(0.45, 0.45, 0.48), "light": Color(0.85, 0.92, 1.0),
+		"light_energy": 0.5, "density": 1.0}
+	var kits := [
+		RoomKits.kit("stockroom", 3.0), RoomKits.kit("back_office", 2.0, {"floor": "carpet", "floor_tint": Color(0.35, 0.35, 0.45)}),
+		RoomKits.kit("restroom", 1.0, {"max_count": 2, "floor_tint": Color(0.8, 0.85, 0.85)}),
+		RoomKits.kit("food_stall", 1.5, {"min_cells": 2, "max_count": 1, "floor_tint": Color(0.8, 0.7, 0.55)}),
+		RoomKits.kit("arcade_hall", 1.0, {"max_count": 1, "floor": "carpet", "floor_tint": Color(0.25, 0.15, 0.35)}),
+		RoomKits.kit("cinema", 1.0, {"min_cells": 2, "max_count": 1, "tidy": true, "floor": "carpet", "floor_tint": Color(0.35, 0.1, 0.12)}),
+		RoomKits.kit("storage", 1.0), RoomKits.kit("vault", 1.0, {"deep": true, "min_depth": 2}),
+	]
+	for spec in [["west", Vector3(-55, 0, -27), Vector2i(1, 0), Vector2i(2, 0)], ["east", Vector3(19, 0, -27), Vector2i(-1, 0), Vector2i(0, 0)]]:
+		var grid := RoomGrid.new()
+		grid.name = spec[0]
+		grid.origin = spec[1]
+		grid.cols = 3
+		grid.rows = 4
+		grid.core_side = spec[2]
+		grid.core_spans.assign([Vector2(-25, 25)])
+		grid.ports.assign([spec[3]])
+		grid.theme = back
+		grid.kits = kits
+		_plan_wing(grid)
+	var park := RoomGrid.new()
+	park.name = "car park"
+	park.origin = Vector3(-24, 0, 25)
+	park.cols = 4
+	park.rows = 3
+	park.core_side = Vector2i(0, -1)
+	park.core_spans.assign([Vector2(-19, 19)])
+	park.ports.assign([Vector2i(1, 0), Vector2i(2, 0)])
+	park.open_plan = true
+	park.dark_chance = 0.45
+	park.theme = {"floor": "concrete", "floor_tint": Color(0.5, 0.5, 0.52), "wall": "concrete", "wall_tint": Color(0.55, 0.55, 0.58),
+		"roof": "concrete", "roof_tint": Color(0.4, 0.4, 0.42), "light": Color(1.0, 0.7, 0.35), "light_energy": 0.55, "pillars": true}
+	park.kits = [RoomKits.kit("parking", 1.0)]
+	_plan_wing(park)
+
+
 func _build_shell() -> void:
 	_box(Vector3(36, 1, 48), Vector3(0, -0.5, 0), "tile", Vector3.ZERO, Layers.WORLD, Color(0.85, 0.82, 0.78), 1.5)
 	_box(Vector3(36, 1, 48), Vector3(0, ROOF_Y + 0.5, 0), "panel", Vector3.ZERO, Layers.WORLD, Color(0.5, 0.48, 0.5))
 	_box(Vector3(36, ROOF_Y, 1), Vector3(0, ROOF_Y / 2.0, -24.5), "concrete")
-	_box(Vector3(1, ROOF_Y, 48), Vector3(18.5, ROOF_Y / 2.0, 0), "concrete", Vector3.ZERO, Layers.WORLD, Color(0.8, 0.75, 0.8))
-	_box(Vector3(1, ROOF_Y, 48), Vector3(-18.5, ROOF_Y / 2.0, 0), "concrete", Vector3.ZERO, Layers.WORLD, Color(0.8, 0.75, 0.8))
-	# Main entrance: glass doors chained shut, with the dark car park behind them.
-	_box(Vector3(36, ROOF_Y, 1), Vector3(0, ROOF_Y / 2.0, 24.5), "concrete", Vector3.ZERO, Layers.WORLD, Color(0.8, 0.75, 0.8))
+	_wall_with_ports(Vector3(18.5, 0, -24), Vector3(18.5, 0, 24), ROOF_Y, "concrete", 1.0, Color(0.8, 0.75, 0.8))
+	_wall_with_ports(Vector3(-18.5, 0, -24), Vector3(-18.5, 0, 24), ROOF_Y, "concrete", 1.0, Color(0.8, 0.75, 0.8))
+	# Main entrance: glass doors chained shut. Side doors lead out to the car park.
+	_wall_with_ports(Vector3(-18, 0, 24.5), Vector3(18, 0, 24.5), ROOF_Y, "concrete", 1.0, Color(0.8, 0.75, 0.8))
 	for x in [-3.0, -1.0, 1.0, 3.0]:
 		_box(Vector3(1.9, 3.0, 0.08), Vector3(x, 1.5, 23.9), "panel", Vector3.ZERO, 0, Color(0.25, 0.35, 0.4))
 	_box(Vector3(0.1, 0.1, 0.12), Vector3(0, 1.1, 23.8), "rust_metal", Vector3(0, 0, 10), 0)
@@ -278,18 +321,18 @@ func _build_staff_area() -> void:
 	_add_gate(Vector3(0.0, 2.4, -18.0), Vector3(4.0, 4.8, 0.15))
 	_box(Vector3(35.6, 0.02, 5.6), Vector3(0, 0.01, -21), "concrete", Vector3.ZERO, 0, Color(0.6, 0.6, 0.55))
 	# Pallets, cages and bins.
-	_box(Vector3(1.6, 1.2, 1.2), Vector3(-14.5, 0.6, -20.5), "wood")
+	_box(Vector3(1.6, 1.2, 1.2), Vector3(-13.0, 0.6, -23.0), "wood")
 	_box(Vector3(1.6, 2.0, 1.2), Vector3(-6.0, 1.0, -22.8), "grate", Vector3.ZERO, Layers.WORLD, Color.WHITE, 1.0)
 	_box(Vector3(1.2, 1.2, 1.2), Vector3(5.0, 0.6, -20.0), "rust_metal", Vector3(0, 20, 0))
-	_add_locker(Vector3(-17.4, 0, -22.0), PI / 2.0)
-	_add_locker(Vector3(-17.4, 0, -20.6), PI / 2.0)
-	# The freight lift in the north-east corner of the dock.
-	var center := Vector3(13.5, 0, -21.2)
+	_add_locker(Vector3(-10.5, 0, -23.4), 0.0)
+	_add_locker(Vector3(-9.1, 0, -23.4), 0.0)
+	# The freight lift on the east side of the dock, clear of the door to the east wing.
+	var center := Vector3(10.5, 0, -21.2)
 	_box(Vector3(3.2, 0.1, 3.2), center + Vector3(0, 0.05, 0), "grate", Vector3.ZERO, 0, Color(0.7, 1.0, 0.8))
 	for corner in [Vector3(1.5, 0, 1.5), Vector3(-1.5, 0, 1.5), Vector3(1.5, 0, -1.5), Vector3(-1.5, 0, -1.5)]:
 		_box(Vector3(0.15, 3.0, 0.15), center + corner + Vector3(0, 1.5, 0), "rust_metal")
 	_box(Vector3(3.2, 0.2, 3.2), center + Vector3(0, 3.1, 0), "panel")
-	_glow(Vector3(1.6, 0.3, 0.05), Vector3(13.5, 3.6, -18.2), Color(1.0, 0.2, 0.15))
+	_glow(Vector3(1.6, 0.3, 0.05), Vector3(10.5, 3.6, -18.2), Color(1.0, 0.2, 0.15))
 	_add_extraction(center)
 
 
@@ -303,4 +346,4 @@ func _build_lights() -> void:
 	_light(Vector3(13, 9.0, 6), Color(1.0, 0.7, 0.5), 0.5, 10.0, false)
 	_light(Vector3(-13, 9.0, 8), Color(1.0, 0.75, 0.8), 0.4, 8.0, true)
 	_light(Vector3(-2, 3.8, -21), Color(1.0, 0.85, 0.6), 0.5, 9.0, true)
-	_light(Vector3(13.5, 2.8, -21.2), Color(1.0, 0.85, 0.6), 0.4, 6.0, false)
+	_light(Vector3(10.5, 2.8, -21.2), Color(1.0, 0.85, 0.6), 0.4, 6.0, false)

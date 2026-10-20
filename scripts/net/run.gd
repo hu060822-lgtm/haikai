@@ -12,7 +12,7 @@ signal guardian_state(energy: float, cooldowns: Dictionary, extracted: int)
 signal guardian_ping(position: Vector3, radius: float)
 signal power_changed(on: bool)
 
-const MATCH_TIME := 720.0
+const MATCH_TIME := 900.0  # 15 minutes: the maps have big random wings to explore
 const BODY_SCATTER := 0.6
 
 static var instance: Run

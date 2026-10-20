@@ -207,24 +207,94 @@ func _nav_ready() -> bool:
 func _build_model() -> void:
 	_model = Node3D.new()
 	add_child(_model)
-	var skin := PS1Materials.get_material("concrete", Color(0.75, 0.72, 0.68), true)
-	var dark := PS1Materials.get_material("rust_metal", Color(0.25, 0.22, 0.2), true)
+	var skin := PS1Materials.get_material("concrete", Color(0.75, 0.72, 0.68))
+	var dark := PS1Materials.get_material("rust_metal", Color(0.25, 0.22, 0.2))
 	var hip_y := head_height * 0.55
 	for side in [-1.0, 1.0]:
-		var leg := MonsterKit.limb(_model, Vector3(0.35 * side, hip_y, 0), Vector3(0.14, hip_y, 0.14), skin)
-		MonsterKit.box(leg, Vector3(0.22, 0.2, 0.22), Vector3(0, -hip_y * 0.5, 0), dark)  # knee
+		# Stilt legs: a long thigh, a knobbly knee, a longer shin and splayed toes.
+		var leg := Node3D.new()
+		leg.position = Vector3(0.35 * side, hip_y, 0)
+		_model.add_child(leg)
+		var knee := Vector3(0.04 * side, -hip_y * 0.48, -0.18)
+		var ankle := Vector3(0.0, -hip_y + 0.1, 0.05)
+		MonsterKit.part(leg, LowPoly.tube(PackedVector3Array([Vector3.ZERO, Vector3(0.02 * side, -hip_y * 0.25, -0.1),
+			knee, Vector3(0.03 * side, -hip_y * 0.75, -0.06), ankle]),
+			PackedFloat32Array([0.13, 0.08, 0.09, 0.06, 0.05]), 5), Vector3.ZERO, skin)
+		MonsterKit.part(leg, LowPoly.blob(0.13, Vector3(1.0, 1.3, 1.0), 0, 0.15, 3), knee, dark)
+		MonsterKit.part(leg, LowPoly.blob(0.08, Vector3.ONE, 0, 0.1, 4), ankle, dark)
+		var toes := []
+		for a in [-0.6, 0.0, 0.6, PI]:
+			var tip := ankle + Vector3(sin(a) * 0.32, -0.09, -cos(a) * 0.32)
+			toes.append([LowPoly.tube(PackedVector3Array([ankle, ankle.lerp(tip, 0.5) + Vector3(0, 0.03, 0), tip]),
+				PackedFloat32Array([0.04, 0.03, 0.0]), 3), Transform3D.IDENTITY])
+		MonsterKit.part(leg, LowPoly.merge(toes), Vector3.ZERO, dark)
 		_legs.append(leg)
-		var arm := MonsterKit.limb(_model, Vector3(0.45 * side, hip_y + 1.2, 0), Vector3(0.08, hip_y + 0.6, 0.08), skin)
+		# Arms long enough to drag their fingers near the floor.
+		var arm := Node3D.new()
+		arm.position = Vector3(0.45 * side, hip_y + 1.2, 0)
+		_model.add_child(arm)
 		arm.rotation.z = 0.08 * side
-	MonsterKit.box(_model, Vector3(0.9, 1.4, 0.4), Vector3(0, hip_y + 0.7, 0), skin)
-	var neck_length := head_height - hip_y - 1.5
-	MonsterKit.box(_model, Vector3(0.12, neck_length, 0.12), Vector3(0, hip_y + 1.4 + neck_length / 2.0, 0), skin)
+		var arm_length := hip_y + 0.6
+		var elbow := Vector3(0.03 * side, -arm_length * 0.45, 0.14)
+		var wrist := Vector3(0.0, -arm_length * 0.86, -0.06)
+		MonsterKit.part(arm, LowPoly.tube(PackedVector3Array([Vector3.ZERO, elbow, wrist]),
+			PackedFloat32Array([0.08, 0.05, 0.04]), 5), Vector3.ZERO, skin)
+		MonsterKit.part(arm, LowPoly.blob(0.08, Vector3.ONE, 0, 0.1, 5), Vector3.ZERO, skin)
+		MonsterKit.part(arm, LowPoly.blob(0.06, Vector3(1, 1.3, 1), 0, 0.1, 6), elbow, dark)
+		var fingers := []
+		for i in 3:
+			var a := (i - 1.0) * 0.45
+			var knuckle := wrist + Vector3(sin(a) * 0.08, -0.12, -cos(a) * 0.06)
+			var tip := wrist + Vector3(sin(a) * 0.18, -arm_length * 0.14, -cos(a) * 0.14 + 0.1)
+			fingers.append([LowPoly.tube(PackedVector3Array([wrist, knuckle, tip]),
+				PackedFloat32Array([0.03, 0.025, 0.0]), 3), Transform3D.IDENTITY])
+		MonsterKit.part(arm, LowPoly.merge(fingers), Vector3.ZERO, dark)
+	# Pelvis and a starved, flat torso with the ribs showing.
+	MonsterKit.part(_model, LowPoly.blob(0.3, Vector3(1.35, 0.6, 0.8), 0, 0.12, 7), Vector3(0, hip_y, 0), skin)
+	var torso := PackedVector2Array([Vector2(0.0, -0.05), Vector2(0.26, 0.0), Vector2(0.2, 0.4),
+		Vector2(0.34, 0.8), Vector2(0.46, 1.15), Vector2(0.32, 1.38), Vector2(0.1, 1.46), Vector2(0.0, 1.47)])
+	MonsterKit.part(_model, LowPoly.lathe(torso, 7), Vector3(0, hip_y, 0), skin, Vector3.ZERO, Vector3(1.0, 1.0, 0.55))
+	var ribs := []
+	for i in 3:
+		var y := hip_y + 0.75 + i * 0.2
+		var half := 0.33 + i * 0.04
+		for side in [-1.0, 1.0]:
+			ribs.append([LowPoly.tube(PackedVector3Array([Vector3(side * half, y + 0.05, 0.0),
+				Vector3(side * half * 0.75, y, -0.2), Vector3(side * 0.06, y - 0.06, -0.24)]),
+				PackedFloat32Array([0.035, 0.035, 0.02]), 4), Transform3D.IDENTITY])
+	MonsterKit.part(_model, LowPoly.merge(ribs), Vector3.ZERO, skin)
+	# A neck like a crane's: one long curve of skin over knuckled vertebrae.
+	var neck_base := Vector3(0, hip_y + 1.35, 0.02)
+	var neck_top := Vector3(0, head_height - 0.05, 0.0)
+	var neck_path := PackedVector3Array()
+	var neck_radii := PackedFloat32Array()
+	var vertebrae := []
+	for i in 7:
+		var f := i / 6.0
+		var p := neck_base.lerp(neck_top, f) + Vector3(0, 0, sin(f * PI) * 0.35)
+		neck_path.append(p)
+		neck_radii.append(lerpf(0.09, 0.05, f))
+		if i > 0 and i < 6:
+			vertebrae.append([LowPoly.prism(4, 0.06, 0.03, 0.08), LowPoly.at(p + Vector3(0, 0, lerpf(0.09, 0.05, f)), Vector3(90, 45, 0))])
+	MonsterKit.part(_model, LowPoly.tube(neck_path, neck_radii, 5), Vector3.ZERO, skin)
+	MonsterKit.part(_model, LowPoly.merge(vertebrae), Vector3.ZERO, dark)
 	_head = Node3D.new()
 	_head.position = Vector3(0, head_height, 0)
 	_model.add_child(_head)
-	MonsterKit.sphere(_head, 0.3, Vector3(0, 0, -0.15), skin, Vector3(0.8, 0.9, 1.6))
-	var eye := MonsterKit.sphere(_head, 0.08, Vector3(0, 0.02, -0.6), skin)
-	eye.material_override = PS1Materials.get_material("concrete", Color(0.2, 0.2, 0.2), true, Vector2.ONE, Color(1.0, 0.9, 0.6))
+	# A long eyeless skull that ends in one lamp of an eye, with a slack lower jaw.
+	var skull := PackedVector2Array([Vector2(0.0, -0.14), Vector2(0.19, -0.08), Vector2(0.25, 0.1),
+		Vector2(0.22, 0.3), Vector2(0.15, 0.48), Vector2(0.11, 0.6), Vector2(0.0, 0.64)])
+	MonsterKit.part(_head, LowPoly.lathe(skull, 6), Vector3(0, 0.03, 0), skin, Vector3(-90, 0, 0), Vector3(0.85, 1.0, 1.0))
+	MonsterKit.part(_head, LowPoly.tube(PackedVector3Array([Vector3(0, -0.1, 0.02), Vector3(0, -0.2, -0.22),
+		Vector3(0, -0.17, -0.48)]), PackedFloat32Array([0.09, 0.07, 0.03]), 4), Vector3.ZERO, skin, Vector3.ZERO, Vector3(1.4, 1.0, 1.0))
+	var teeth := []
+	for i in 3:
+		for side in [-1.0, 1.0]:
+			teeth.append([LowPoly.prism(3, 0.025, 0.0, 0.08), LowPoly.at(Vector3(side * 0.06, -0.12, -0.18 - i * 0.08))])
+	MonsterKit.part(_head, LowPoly.merge(teeth), Vector3.ZERO, PS1Materials.get_material("concrete", Color(0.85, 0.82, 0.7)))
+	MonsterKit.part(_head, LowPoly.prism(6, 0.1, 0.1, 0.06), Vector3(0, 0.03, -0.6), dark, Vector3(-90, 0, 0))
+	var eye_material := PS1Materials.get_material("concrete", Color(0.2, 0.2, 0.2), false, Vector2.ONE, Color(1.0, 0.9, 0.6))
+	MonsterKit.part(_head, LowPoly.blob(0.075, Vector3(1, 1, 0.7), 0), Vector3(0, 0.03, -0.64), eye_material)
 	_eye_light = OmniLight3D.new()
 	_eye_light.position = Vector3(0, 0, -0.7)
 	_eye_light.light_color = Color(0.9, 0.95, 0.7)

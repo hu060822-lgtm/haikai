@@ -10,6 +10,9 @@ signal objective_done()
 ## Render layer for roofs: the guardian's top-down camera leaves them out.
 const ROOF_RENDER_LAYER := 1 << 9
 
+## Tests turn the random wings off to keep runs small and fast (see RoomGrid).
+static var compact := false
+
 ## Shown to players: the map's name, what to do first, and what to do after.
 var map_name := ""
 var intro := ""
@@ -29,6 +32,13 @@ var monster_spawn := Vector3.ZERO
 var patrol_points: Array[Vector3] = []
 var loot_spots: Array[Vector3] = []
 var loot_count := Vector2i(14, 18)
+## Extra luck for loot rolled at a spot (deeper wing rooms hold better things).
+var loot_luck := {}
+## The randomly arranged rooms added around the hand-built core this run.
+var wings: Array[RoomGrid] = []
+## Floor footprints (x/z) of the solid boxes built so far that a monster can't walk
+## under or step over; random wings keep their patrol points clear of them.
+var blockers: Array[Rect2] = []
 ## A map lit so brightly that lanterns and night vision don't matter (the dreamcore one).
 var bright := false
 ## This run's item pool (LootTable.make_pool), set by the host before loot is rolled.
@@ -122,7 +132,8 @@ func roll_loot() -> Array:
 		spots[j] = tmp
 	var result := []
 	for i in mini(rng.randi_range(loot_count.x, loot_count.y), spots.size()):
-		result.append({"item": LootTable.roll(rng, 0.0, loot_pool), "pos": spots[i], "rot": rng.randf_range(0.0, TAU)})
+		var luck: float = loot_luck.get(spots[i], 0.0)
+		result.append({"item": LootTable.roll(rng, luck, loot_pool), "pos": spots[i], "rot": rng.randf_range(0.0, TAU)})
 	return result
 
 
@@ -277,6 +288,7 @@ func _box(size: Vector3, pos: Vector3, texture: String, rot_deg := Vector3.ZERO,
 		shape.size = size
 		collider.shape = shape
 		root.add_child(collider)
+		_block(root, size, Vector3.ZERO)
 	_nav.add_child(root)
 	return root
 
@@ -311,6 +323,96 @@ func _cylinder(from: Vector3, to: Vector3, radius: float, texture: String,
 		root.add_child(collider)
 	_nav.add_child(root)
 	return root
+
+
+## A low-poly prop: parts are [mesh, texture, tint, transform, (emission)] in the prop's
+## own space; parts sharing a material are merged into one mesh. A non-zero collider
+## size adds a static box (centred `collider_offset` above the floor, or half its height).
+func _prop(parts: Array, pos: Vector3, yaw_deg: float, collider_size: Vector3,
+		collider_offset := Vector3(INF, INF, INF), layer := Layers.WORLD) -> Node3D:
+	var root: Node3D = StaticBody3D.new() if collider_size != Vector3.ZERO else Node3D.new()
+	if root is StaticBody3D:
+		root.collision_layer = layer
+		root.collision_mask = 0
+	root.position = pos
+	root.rotation.y = deg_to_rad(yaw_deg)
+	var groups := {}
+	var order := []
+	for part in parts:
+		var emission: Color = part[4] if part.size() > 4 else Color.BLACK
+		var key := "%s|%s|%s" % [part[1], part[2], emission]
+		if not groups.has(key):
+			groups[key] = {"texture": part[1], "tint": part[2], "emission": emission, "parts": []}
+			order.append(key)
+		groups[key].parts.append([part[0], part[3]])
+	for key in order:
+		var group: Dictionary = groups[key]
+		var mesh: Mesh = group.parts[0][0] if group.parts.size() == 1 and group.parts[0][1] == Transform3D.IDENTITY \
+			else LowPoly.merge(group.parts)
+		root.add_child(LowPoly.instance(mesh, group.texture, group.tint, Transform3D.IDENTITY, group.emission))
+	if root is StaticBody3D:
+		var collider := CollisionShape3D.new()
+		var shape := BoxShape3D.new()
+		shape.size = collider_size
+		collider.shape = shape
+		collider.position = Vector3(0, collider_size.y / 2.0, 0) if collider_offset.x == INF else collider_offset
+		root.add_child(collider)
+		_block(root, collider_size, collider.position)
+	_nav.add_child(root)
+	return root
+
+
+func _block(root: Node3D, size: Vector3, offset: Vector3) -> void:
+	var box: AABB = root.transform * AABB(offset - size / 2.0, size)
+	if box.end.y > 0.45 and box.position.y < BoilerColossus.HEIGHT:
+		blockers.append(Rect2(box.position.x, box.position.z, box.size.x, box.size.z))
+
+
+## True if a big monster standing at `pos` would touch none of the blockers.
+func is_clear(pos: Vector3, radius := BoilerColossus.RADIUS + 0.2) -> bool:
+	var at := Vector2(pos.x, pos.z)
+	for rect in blockers:
+		if rect.grow(radius).has_point(at):
+			return false
+	return true
+
+
+## Plans a wing of random rooms (see RoomGrid) for this run. Plan wings before building
+## the core's walls (so _wall_with_ports can cut their doorways), then _build_wings().
+func _plan_wing(grid: RoomGrid) -> RoomGrid:
+	grid.map = self
+	grid.rng = rng
+	if not compact:
+		wings.append(grid)
+	return grid
+
+
+func _build_wings() -> void:
+	for grid in wings:
+		grid.build()
+		bounds = bounds.merge(grid.world_bounds())
+
+
+## A core wall with doorways (and a floor across the wall's thickness) wherever a
+## planned wing has a port on it.
+func _wall_with_ports(from: Vector3, to: Vector3, height: float, texture: String, thickness := 0.2,
+		tint := Color.WHITE, openings := []) -> void:
+	var cut := openings.duplicate()
+	var length := from.distance_to(to)
+	var dir := (to - from) / length
+	for grid in wings:
+		for point in grid.port_points():
+			var rel := point - from
+			var along := rel.dot(dir)
+			var across := rel - dir * along
+			across.y = 0.0
+			if across.length() > thickness + 0.6 or along <= 0.0 or along >= length:
+				continue
+			cut.append([along, RoomGrid.DOOR_WIDE.x, RoomGrid.DOOR_WIDE.y])
+			var sill := Vector3(RoomGrid.DOOR_WIDE.x, 1.0, thickness + 1.2) if absf(dir.x) > 0.5 \
+				else Vector3(thickness + 1.2, 1.0, RoomGrid.DOOR_WIDE.x)
+			_box(sill, Vector3(from.x, 0, from.z) + dir * along + Vector3(0, -0.5, 0), texture, Vector3.ZERO, Layers.WORLD, tint)
+	_wall(from, to, height, texture, cut, thickness, tint)
 
 
 func _light(pos: Vector3, color: Color, energy: float, light_range: float, flicker: bool) -> OmniLight3D:

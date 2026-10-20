@@ -244,12 +244,41 @@ func _build_model() -> void:
 	var tin := PS1Materials.get_material("brass", Color(0.8, 0.75, 0.6), true)
 	var key := PS1Materials.get_material("rust_metal", Color(0.6, 0.5, 0.4), true)
 	var eye := PS1Materials.get_material("concrete", Color(0.3, 0.0, 0.0), true, Vector2.ONE, Color(1.0, 0.1, 0.05))
+	var body := _rat_body()
+	var key_mesh := _uv(LowPoly.merge([
+		[LowPoly.prism(5, 0.006, 0.006, 0.05), LowPoly.at(Vector3(0, 0, -0.025), Vector3(90, 0, 0))],
+		[LowPoly.prism(6, 0.022, 0.022, 0.008), LowPoly.at(Vector3(0.02, 0, 0.0), Vector3(90, 0, 0))],
+		[LowPoly.prism(6, 0.022, 0.022, 0.008), LowPoly.at(Vector3(-0.02, 0, 0.0), Vector3(90, 0, 0))],
+	]))
+	var tail := LowPoly.tube(PackedVector3Array([Vector3(0, 0.035, 0.1), Vector3(0, 0.03, 0.16), Vector3(0.03, 0.015, 0.21),
+		Vector3(0.01, 0.01, 0.27)]), PackedFloat32Array([0.008, 0.006, 0.004, 0.0]), 3)
+	var eyes := LowPoly.merge([[LowPoly.blob(0.011, Vector3.ONE, 0), LowPoly.at(Vector3(0.022, 0.07, -0.1))],
+		[LowPoly.blob(0.011, Vector3.ONE, 0), LowPoly.at(Vector3(-0.022, 0.07, -0.1))]])
 	for i in RAT_COUNT:
 		var rat := Node3D.new()
 		add_child(rat)
-		MonsterKit.sphere(rat, 0.07, Vector3(0, 0.05, 0), tin, Vector3(0.9, 0.7, 1.8))
-		MonsterKit.box(rat, Vector3(0.01, 0.07, 0.05), Vector3(0, 0.15, 0.03), key)
-		MonsterKit.box(rat, Vector3(0.01, 0.01, 0.16), Vector3(0, 0.04, 0.17), key)  # tail
-		MonsterKit.box(rat, Vector3(0.06, 0.02, 0.02), Vector3(0, 0.07, -0.12), eye)
+		# Child 0 the tin body, child 1 the wind-up key (_animate spins it about its shaft).
+		MonsterKit.part(rat, body, Vector3.ZERO, tin)
+		var key_part := MonsterKit.part(rat, key_mesh, Vector3(0, 0.125, 0.05), key)
+		key_part.rotation.x = deg_to_rad(-55.0)
+		MonsterKit.part(rat, tail, Vector3.ZERO, key)
+		MonsterKit.part(rat, eyes, Vector3.ZERO, eye)
 		rat.position = Vector3(rng.randf_range(-0.5, 0.5), 0.06, rng.randf_range(-0.5, 0.5))
 		_rats.append(rat)
+
+
+## One tin rat: a pressed-metal teardrop body with its nose to -z, two round ears and
+## a little wheel under the belly. Built once and shared by the whole swarm.
+static func _rat_body() -> Mesh:
+	var shell := PackedVector2Array([Vector2(0.0, -0.12), Vector2(0.035, -0.115), Vector2(0.058, -0.07),
+		Vector2(0.062, -0.01), Vector2(0.05, 0.04), Vector2(0.032, 0.08), Vector2(0.012, 0.115), Vector2(0.0, 0.125)])
+	var parts := [[LowPoly.lathe(shell, 7), LowPoly.at(Vector3(0, 0.05, 0), Vector3(-90, 0, 0), Vector3(1.0, 0.8, 1.0))]]
+	for side in [-1.0, 1.0]:
+		parts.append([LowPoly.prism(6, 0.024, 0.024, 0.006), LowPoly.at(Vector3(0.026 * side, 0.1, -0.05), Vector3(-10, 0, 25 * side))])
+		parts.append([LowPoly.prism(6, 0.016, 0.016, 0.008), LowPoly.at(Vector3(0.045 * side, 0.012, 0.0), Vector3(0, 0, 90))])
+	parts.append([LowPoly.prism(4, 0.006, 0.0, 0.03), LowPoly.at(Vector3(0, 0.052, -0.135), Vector3(-90, 0, 0))])
+	return _uv(LowPoly.merge(parts))
+
+
+static func _uv(mesh: Mesh) -> Mesh:
+	return LootShapes.with_uvs(mesh, 6.0)

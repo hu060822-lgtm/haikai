@@ -37,6 +37,27 @@ static func limb(parent: Node3D, pivot: Vector3, size: Vector3, material: Materi
 	return joint
 
 
+## Any LowPoly mesh as a part of a model.
+static func part(parent: Node3D, mesh: Mesh, pos: Vector3, material: Material,
+		rot_deg := Vector3.ZERO, scale := Vector3.ONE) -> MeshInstance3D:
+	var mesh_instance := MeshInstance3D.new()
+	mesh_instance.mesh = mesh
+	mesh_instance.material_override = material
+	mesh_instance.transform = LowPoly.at(pos, rot_deg, scale)
+	parent.add_child(mesh_instance)
+	return mesh_instance
+
+
+## A pivot node with a tapered n-sided limb hanging down from it (top radius at the joint).
+static func taper_limb(parent: Node3D, pivot: Vector3, length: float, top: float, bottom: float,
+		material: Material, sides := 5) -> Node3D:
+	var joint := Node3D.new()
+	joint.position = pivot
+	parent.add_child(joint)
+	part(joint, LowPoly.prism(sides, bottom, top, length), Vector3(0, -length / 2.0, 0), material)
+	return joint
+
+
 ## Host-authoritative replication of the given properties (".:position" style paths).
 static func add_sync(node: Node, properties: Array) -> MultiplayerSynchronizer:
 	var sync := MultiplayerSynchronizer.new()
