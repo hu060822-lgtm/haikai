@@ -1,0 +1,137 @@
+"""Generate the low-fi placeholder sound effects in sounds/.
+
+Run from the repo root: python3 tools/gen_sounds.py
+Everything is synthesised at 11025 Hz, 8-bit-ish crunch included, for a PS1 feel.
+"""
+import math
+import os
+import random
+import struct
+import wave
+
+RATE = 11025
+OUT = os.path.join(os.path.dirname(__file__), "..", "sounds")
+rng = random.Random(7)
+
+
+def write(name, samples, loop=False):
+    path = os.path.join(OUT, name + ".wav")
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(RATE)
+        frames = bytearray()
+        for s in samples:
+            s = max(-1.0, min(1.0, s))
+            s = round(s * 64) / 64  # bit crush
+            frames += struct.pack("<h", int(s * 32000))
+        w.writeframes(bytes(frames))
+
+
+def env(i, n, attack=0.01, release=0.3):
+    t = i / n
+    a = min(1.0, t / attack) if attack > 0 else 1.0
+    r = 1.0 if t < 1 - release else max(0.0, (1 - t) / release)
+    return a * r
+
+
+def lowpass(samples, k):
+    out, y = [], 0.0
+    for s in samples:
+        y += k * (s - y)
+        out.append(y)
+    return out
+
+
+def noise(n):
+    return [rng.uniform(-1, 1) for _ in range(n)]
+
+
+def thump():
+    n = int(RATE * 0.9)
+    base = [math.sin(2 * math.pi * (55 - 25 * i / n) * i / RATE) * math.exp(-i / (RATE * 0.18)) for i in range(n)]
+    crunch = lowpass(noise(n), 0.08)
+    return [b * 0.9 + c * math.exp(-i / (RATE * 0.05)) * 0.8 for i, (b, c) in enumerate(zip(base, crunch))]
+
+
+def hiss():
+    n = int(RATE * 3.0)
+    raw = noise(n)
+    hp = [raw[i] - raw[i - 1] if i else 0 for i in range(n)]
+    return [h * 0.5 * env(i, n, 0.05, 0.4) for i, h in enumerate(hp)]
+
+
+def whistle():
+    n = int(RATE * 1.6)
+    out = []
+    for i in range(n):
+        t = i / RATE
+        f = 420 + 8 * math.sin(2 * math.pi * 5 * t)
+        s = math.sin(2 * math.pi * f * t) * 0.5 + math.sin(2 * math.pi * f * 1.5 * t) * 0.3
+        s += rng.uniform(-0.15, 0.15)
+        out.append(s * env(i, n, 0.08, 0.35))
+    return out
+
+
+def step():
+    n = int(RATE * 0.12)
+    return [s * math.exp(-i / (RATE * 0.02)) * 0.6 for i, s in enumerate(lowpass(noise(n), 0.3))]
+
+
+def pickup():
+    n = int(RATE * 0.15)
+    return [math.sin(2 * math.pi * (600 + 900 * i / n) * i / RATE) * 0.4 * env(i, n, 0.01, 0.5) for i in range(n)]
+
+
+def clank():
+    n = int(RATE * 0.8)
+    out = []
+    for i in range(n):
+        t = i / RATE
+        s = sum(math.sin(2 * math.pi * f * t) for f in (310, 523, 787, 1130)) / 4
+        out.append(s * math.exp(-t * 6) * 0.7 + rng.uniform(-1, 1) * math.exp(-t * 40) * 0.5)
+    return out
+
+
+def tink():
+    n = int(RATE * 0.3)
+    return [math.sin(2 * math.pi * 1800 * i / RATE) * math.exp(-i / (RATE * 0.04)) * 0.5 for i in range(n)]
+
+
+def drone():
+    n = RATE * 6
+    out = []
+    for i in range(n):
+        t = i / RATE
+        s = math.sin(2 * math.pi * 41 * t) * 0.35 + math.sin(2 * math.pi * 61.5 * t + math.sin(t * 0.5)) * 0.2
+        out.append(s)
+    rumble = lowpass(noise(n), 0.02)
+    return [o + r * 0.6 for o, r in zip(out, rumble)]
+
+
+def heartbeat():
+    n = int(RATE * 0.8)
+    out = [0.0] * n
+    for start in (0, int(RATE * 0.22)):
+        for i in range(int(RATE * 0.15)):
+            out[start + i] += math.sin(2 * math.pi * 50 * i / RATE) * math.exp(-i / (RATE * 0.04))
+    return out
+
+
+def death():
+    n = int(RATE * 2.5)
+    out = []
+    for i in range(n):
+        t = i / RATE
+        f = 200 * math.exp(-t * 1.2) + 30
+        out.append((math.sin(2 * math.pi * f * t) * 0.6 + rng.uniform(-1, 1) * 0.3) * env(i, n, 0.01, 0.5))
+    return out
+
+
+if __name__ == "__main__":
+    os.makedirs(OUT, exist_ok=True)
+    for name, fn in [("thump", thump), ("hiss", hiss), ("whistle", whistle), ("step", step),
+                     ("pickup", pickup), ("clank", clank), ("tink", tink), ("drone", drone),
+                     ("heartbeat", heartbeat), ("death", death)]:
+        write(name, fn())
+    print("sounds written to", os.path.abspath(OUT))

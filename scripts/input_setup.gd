@@ -12,6 +12,11 @@ const BINDINGS := {
 	"interact": [KEY_E],
 	"lantern": [KEY_F],
 	"drop": [KEY_G],
+	"use_boost": [KEY_Q],
+}
+
+const MOUSE_BINDINGS := {
+	"use_weapon": [MOUSE_BUTTON_LEFT],
 }
 
 
@@ -23,4 +28,12 @@ static func ensure() -> void:
 		for key in BINDINGS[action]:
 			var event := InputEventKey.new()
 			event.physical_keycode = key
+			InputMap.action_add_event(action, event)
+	for action in MOUSE_BINDINGS:
+		if InputMap.has_action(action):
+			continue
+		InputMap.add_action(action)
+		for button in MOUSE_BINDINGS[action]:
+			var event := InputEventMouseButton.new()
+			event.button_index = button
 			InputMap.action_add_event(action, event)
