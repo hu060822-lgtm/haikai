@@ -37,6 +37,7 @@ func _run() -> void:
 	await _test_child()
 	await _test_items()
 	await _test_gear()
+	await _test_squads()
 	Run.forced_monsters = ["colossus"]
 	await _test_maps()
 	print("SMOKE TEST %s (%d failures)" % ["PASSED" if _failures == 0 else "FAILED", _failures])
@@ -394,9 +395,11 @@ func _test_tuner() -> void:
 	player.global_position = Vector3(-13, 0.1, 18)
 	await _frames(300)
 	_check(not tuner.memory.is_empty(), "it remembers where scavengers go")
-	GameNoise.emit(self, Vector3(-6, 0.1, -6), 12.0, GameNoise.Kind.IMPACT)
+	# It only hears noises within earshot, and it has been wandering: throw it near where it is now.
+	var thrown: Vector3 = tuner.global_position + Vector3(6, 0, 0)
+	GameNoise.emit(self, thrown, 12.0, GameNoise.Kind.IMPACT)
 	await _frames(2)
-	_check(tuner._agent.target_position.distance_to(Vector3(-6, 0.1, -6)) < 1.0, "a thrown noise pulls it the wrong way")
+	_check(tuner._agent.target_position.distance_to(thrown) < 1.0, "a thrown noise pulls it the wrong way")
 	GameNoise.emit(self, tuner.global_position, 8.0, GameNoise.Kind.MUSIC)
 	await _frames(2)
 	_check(tuner.stunned, "a tune scrambles it")
@@ -675,6 +678,48 @@ func _test_director() -> void:
 	await _end_run(main)
 
 
+## Another squad's scavenger, standing in front of you: weapons hurt them, never teammates.
+func _test_squads() -> void:
+	print("squads")
+	var main = await _new_run({"weapon": "shotgun"})
+	var player: Player = main.player
+	main.colossus.process_mode = Node.PROCESS_MODE_DISABLED
+	main.colossus.global_position = Vector3(0, 0, -100)
+	var rival := Player.new()
+	rival.name = "99"
+	rival.display_name = "對手"
+	rival.squad = 1
+	main.run.players_root.add_child(rival)
+	await _frames(2)
+	rival.set_physics_process(false)
+	player._camera.current = true
+	var origin: Vector3 = player._camera.global_position
+	var aim: Vector3 = -player._camera.global_basis.z
+	aim.y = 0.0
+	aim = aim.normalized()
+	rival.global_position = player.global_position + aim * 3.0
+	await _frames(2)
+	_check(not rival._name_label.visible, "a rival's name doesn't float over their head")
+	var rule: Dictionary = Gear.WEAPON_HITS.shotgun
+	_check(main.run.player_targets(rule, origin, aim, player) == [rival], "the shotgun's aim line finds the rival")
+	_check(main.run.player_targets(rule, origin, -aim, player).is_empty(), "aiming away misses")
+	rival.squad = 0
+	_check(main.run.player_targets(rule, origin, aim, player).is_empty(), "no friendly fire")
+	rival.squad = 1
+	main.run._weapon("shotgun", origin, aim)
+	await _frames(2)
+	_check(rival.health == Player.MAX_HEALTH - rule.player, "a shotgun hit hurts the rival (hp=%d)" % rival.health)
+	main.run._weapon("crowbar", origin, aim)
+	await _frames(2)
+	_check(rival.health == Player.MAX_HEALTH - rule.player, "the crowbar only reaches arm's length")
+	rival.global_position = player.global_position + aim * 1.5
+	await _frames(2)
+	main.run._weapon("crowbar", origin, aim)
+	await _frames(2)
+	_check(rival.is_dead, "a crowbar finishes them off")
+	await _end_run(main)
+
+
 func _test_maps() -> void:
 	print("maps")
 	for id in MapRoster.MAPS:
@@ -692,6 +737,19 @@ func _test_maps() -> void:
 		var off_mesh := level.patrol_points.filter(func(point: Vector3) -> bool:
 			return NavigationServer3D.map_get_closest_point(nav_map, point).distance_to(point) > 1.0)
 		_check(off_mesh.is_empty(), "%s: patrol points are on the navmesh %s" % [id, off_mesh])
+		var starts: Array[Vector3] = []
+		for slot in Session.SQUADS:
+			starts.append(main.run.squad_start(slot).pos)
+		var close := []
+		for a in starts.size():
+			for b in range(a + 1, starts.size()):
+				if starts[a].distance_to(starts[b]) < 12.0:
+					close.append([a, b])
+		_check(close.is_empty(), "%s: squads start apart %s" % [id, close])
+		# Slot 0 is the map's own spawn; the others come from patrol points.
+		_check(starts.slice(1).all(func(point: Vector3) -> bool:
+			return NavigationServer3D.map_get_closest_point(nav_map, point).distance_to(point) < 1.0),
+			"%s: squad starts are on walkable floor" % id)
 		_check(not level.extraction_zone.powered, "%s: exit starts unpowered" % id)
 		main.run._lever_pulled()
 		await _frames(2)

@@ -4,8 +4,8 @@ set -u
 GODOT="${1:-godot}"
 cd "$(dirname "$0")/.."
 FAILED=0
-# Two scenarios: two scavengers, then a guardian host with one scavenger.
-for PREFIX in "" "guardian-"; do
+# Three scenarios: two scavengers, a guardian host with one scavenger, and two rival squads.
+for PREFIX in "" "guardian-" "pvp-"; do
 	"$GODOT" --headless --path . --script res://tests/net_test.gd -- ${PREFIX}host > /tmp/haikai_net_host.log 2>&1 &
 	HOST=$!
 	sleep 2

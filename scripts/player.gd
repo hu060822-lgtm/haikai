@@ -82,6 +82,8 @@ var lantern_on := true:
 			_lantern.visible = value
 			_lantern_glow.visible = value
 var display_name := "拾荒者"
+## Which squad this scavenger is in (set by the spawner on every peer). See Session.SQUADS.
+var squad := 0
 var input_enabled := true
 var weapon_id := ""
 var weapon_ammo := 0
@@ -281,7 +283,11 @@ func _build_body() -> void:
 	_body = Node3D.new()
 	_body.name = "Body"
 	add_child(_body)
-	var coat := PS1Materials.get_material("concrete", Color(0.45, 0.38, 0.3), true)
+	# In a match with several squads, coats take the squad's colour so you can tell friend from foe.
+	var coat_color := Color(0.45, 0.38, 0.3)
+	if Session.instance != null and Session.instance.is_pvp():
+		coat_color = coat_color.lerp(Session.SQUAD_COLORS[squad], 0.7)
+	var coat := PS1Materials.get_material("concrete", coat_color, true)
 	var skin := PS1Materials.get_material("concrete", Color(0.85, 0.72, 0.6), true)
 	var leather := PS1Materials.get_material("rust_metal", Color(0.5, 0.4, 0.3), true)
 	for part in [
@@ -307,6 +313,8 @@ func _build_body() -> void:
 	_name_label.pixel_size = 0.004
 	_name_label.modulate = Color(0.95, 0.88, 0.7, 0.85)
 	_name_label.outline_size = 8
+	# Only your own squad's names float over their heads.
+	_name_label.visible = is_teammate_of_local()
 	_body.add_child(_name_label)
 
 
@@ -405,6 +413,12 @@ func is_active() -> bool:
 	return not is_dead and not extracted
 
 
+func is_teammate_of_local() -> bool:
+	if Run.instance == null or Run.instance.local_player == null:
+		return true
+	return Run.instance.local_player.squad == squad
+
+
 ## Called on the local player after a successful extraction.
 func set_extracted() -> void:
 	input_enabled = false
@@ -440,6 +454,7 @@ func _process(delta: float) -> void:
 	_body.scale.y = lerpf(_body.scale.y, 0.6 if is_crouching else 1.0, 10.0 * delta)
 	_body.rotation.x = lerpf(_body.rotation.x, -PI / 2.0 if is_dead else 0.0, 4.0 * delta)
 	_name_label.text = display_name
+	_name_label.visible = is_teammate_of_local()
 	# Footsteps of teammates, inferred from how fast their replicated position moves.
 	var moved := Vector2(position.x - _remote_last_pos.x, position.z - _remote_last_pos.z).length()
 	_remote_last_pos = position
@@ -671,7 +686,7 @@ func use_weapon() -> void:
 				_focused.pry(self)
 			else:
 				Sfx.play_3d(get_parent(), global_position, "clank", -10.0, 20.0, 1.4)
-				GameNoise.emit(get_tree(), global_position, 6.0, GameNoise.Kind.TOOL)
+				_fire()
 		"slingshot":
 			if weapon_ammo <= 0:
 				message.emit("彈珠用完了")

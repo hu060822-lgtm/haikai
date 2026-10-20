@@ -6,6 +6,9 @@ extends Node
 ##
 ## Flow: host() / join() -> lobby (roster) -> host calls begin_run() -> every peer builds
 ## the world and reports world_ready -> host spawns players, monsters and loot.
+##
+## Scavengers come in squads (up to SQUADS of up to SQUAD_SIZE). One squad is co-op; with
+## two or more, the squads start apart and can hurt each other (PvPvE).
 
 signal roster_changed()
 signal connection_failed(reason: String)
@@ -17,16 +20,21 @@ signal noise_received(position: Vector3, radius: float, kind: int)
 signal time_synced(seconds: float)
 
 const PORT := 24500
-const MAX_PLAYERS := 4
+const MAX_PLAYERS := 8
+const SQUADS := 4
+const SQUAD_SIZE := 4
+const SQUAD_NAMES := ["紅隊", "藍隊", "黃隊", "綠隊"]
+const SQUAD_COLORS := [Color(0.85, 0.3, 0.25), Color(0.3, 0.55, 0.95), Color(0.95, 0.8, 0.25), Color(0.35, 0.8, 0.4)]
 ## The guardian wins if the scavengers get out with less than this much per scavenger.
 const THRESHOLD_PER_SCAVENGER := 250
 
 static var instance: Session
 
-## peer id -> {"name": String, "role": "scavenger" or "guardian"}
+## peer id -> {"name": String, "role": "scavenger" or "guardian", "squad": int}
 var roster := {}
-## Host: money the scavengers have extracted so far this run.
+## Host: money the scavengers have extracted so far this run (and per squad).
 var extracted_total := 0
+var squad_totals := {}
 var local_name := "拾荒者"
 ## True between the host starting a run and everyone finishing it; joins are refused then.
 var in_run := false
@@ -101,6 +109,7 @@ func leave() -> void:
 	roster = {}
 	in_run = false
 	extracted_total = 0
+	squad_totals.clear()
 	_ready_peers.clear()
 	_finished_peers.clear()
 
@@ -118,6 +127,49 @@ func guardian_id() -> int:
 
 func scavenger_ids() -> Array:
 	return roster.keys().filter(func(id) -> bool: return role_of(id) == "scavenger")
+
+
+func squad_of(id: int) -> int:
+	return roster.get(id, {}).get("squad", 0)
+
+
+## The squads that have scavengers in them, in order.
+func active_squads() -> Array:
+	var squads := []
+	for id in scavenger_ids():
+		if not squad_of(id) in squads:
+			squads.append(squad_of(id))
+	squads.sort()
+	return squads
+
+
+func is_pvp() -> bool:
+	return active_squads().size() > 1
+
+
+func squad_size(squad: int) -> int:
+	return scavenger_ids().filter(func(id) -> bool: return squad_of(id) == squad).size()
+
+
+## Move to the next squad that has room.
+func request_next_squad() -> void:
+	var current := squad_of(local_id())
+	for step in range(1, SQUADS):
+		var squad := (current + step) % SQUADS
+		if squad_size(squad) < SQUAD_SIZE:
+			_to_host(&"_set_squad", [squad])
+			return
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _set_squad(squad: int) -> void:
+	var id := _sender()
+	if not is_host() or in_run or not roster.has(id) or squad < 0 or squad >= SQUADS:
+		return
+	if squad_size(squad) >= SQUAD_SIZE:
+		return
+	roster[id].squad = squad
+	_push_roster()
 
 
 ## Ask to be (or stop being) the guardian. Only one guardian, and never with nobody to hunt.
@@ -143,6 +195,7 @@ func begin_run() -> void:
 	_ready_peers.clear()
 	_finished_peers.clear()
 	extracted_total = 0
+	squad_totals.clear()
 	var seed := randi()
 	_start_run.rpc(seed, roster)
 
@@ -180,6 +233,8 @@ func _player_finished(earned: int) -> void:
 		return
 	_finished_peers[_sender()] = true
 	extracted_total += maxi(earned, 0)
+	var squad := squad_of(_sender())
+	squad_totals[squad] = squad_totals.get(squad, 0) + maxi(earned, 0)
 	_check_all_finished()
 
 
@@ -200,6 +255,7 @@ func summary() -> Dictionary:
 		"extracted": extracted_total, "threshold": threshold,
 		"guardian_won": extracted_total < threshold,
 		"guardian": roster[guardian].name if guardian != 0 else "",
+		"squads": active_squads(), "squad_totals": squad_totals.duplicate(),
 	}
 
 
@@ -236,7 +292,9 @@ func _on_peer_connected(id: int) -> void:
 		return
 	if is_host():
 		# The newcomer introduces itself; until then it shows as a placeholder.
+		var squad := _open_squad()
 		roster[id] = _entry("拾荒者 %d" % id)
+		roster[id].squad = squad
 		_push_roster()
 
 
@@ -261,8 +319,10 @@ func _introduce(player_name: String) -> void:
 	if roster.size() > MAX_PLAYERS:
 		return
 	var role: String = roster.get(id, {}).get("role", "scavenger")
+	var squad: int = roster.get(id, {}).get("squad", _open_squad())
 	roster[id] = _entry(player_name.substr(0, 16))
 	roster[id].role = role
+	roster[id].squad = squad
 	_push_roster()
 
 
@@ -277,7 +337,15 @@ func _set_roster(new_roster: Dictionary) -> void:
 
 
 func _entry(player_name: String) -> Dictionary:
-	return {"name": player_name, "role": "scavenger"}
+	return {"name": player_name, "role": "scavenger", "squad": 0}
+
+
+## Newcomers join the host's squad until it is full.
+func _open_squad() -> int:
+	for squad in SQUADS:
+		if squad_size(squad) < SQUAD_SIZE:
+			return squad
+	return 0
 
 
 func _to_host(method: StringName, args := []) -> void:

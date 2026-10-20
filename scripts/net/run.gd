@@ -135,10 +135,14 @@ func all_players() -> Array[Player]:
 # --- Host: populate the world once every peer has built it ---------------------------
 
 func _host_populate() -> void:
-	var index := 0
+	var squads: Array = Session.instance.active_squads()
+	var counts := {}
 	for id in Session.instance.scavenger_ids():
-		_player_spawner.spawn({"id": id, "name": roster[id].name, "index": index})
-		index += 1
+		var squad := Session.instance.squad_of(id)
+		var index: int = counts.get(squad, 0)
+		counts[squad] = index + 1
+		_player_spawner.spawn({"id": id, "name": roster[id].name, "index": index,
+			"squad": squad, "slot": squads.find(squad)})
 	if Session.instance.guardian_id() == 0 and director_enabled:
 		director = Director.new()
 		director.name = "Director"
@@ -258,6 +262,32 @@ func _guardian_ping(pos: Vector3, radius: float) -> void:
 
 
 ## The patrol point farthest from where players start.
+## Where each squad starts: the first at the map's own spawn, the others at the patrol
+## points that are farthest from every squad placed so far, facing the map's centre.
+## Pure function of the level, so every peer works out the same answer.
+func squad_start(slot: int) -> Dictionary:
+	if slot <= 0 or level.patrol_points.is_empty():
+		return {"pos": level.player_spawn, "yaw": level.player_spawn_yaw}
+	var taken: Array[Vector3] = [level.player_spawn, level.monster_spawn]
+	var pick := level.player_spawn
+	for i in slot:
+		var best := -1.0
+		for point in level.patrol_points:
+			var nearest := INF
+			for other in taken:
+				nearest = minf(nearest, point.distance_to(other))
+			if nearest > best:
+				best = nearest
+				pick = point
+		taken.append(pick)
+	var centre := Vector3.ZERO
+	for point in level.patrol_points:
+		centre += point
+	centre /= level.patrol_points.size()
+	var to := centre - pick
+	return {"pos": pick + Vector3.UP * 0.1, "yaw": atan2(-to.x, -to.z)}
+
+
 func _far_patrol_point() -> Vector3:
 	var best: Vector3 = level.patrol_points[0]
 	for point in level.patrol_points:
@@ -282,11 +312,13 @@ func _spawn_player(data: Dictionary) -> Node:
 	var player := Player.new()
 	player.name = str(data.id)
 	player.display_name = data.name
+	player.squad = data.get("squad", 0)
 	player.set_multiplayer_authority(data.id)
 	player.build_sync()
-	var offset := Vector3((data.index % 2) * 1.2 - 0.6, 0.0, (data.index / 2) * 1.2)
-	player.position = level.player_spawn + offset
-	player.rotation.y = level.player_spawn_yaw
+	var start := squad_start(data.get("slot", 0))
+	var offset := Vector3((data.index % 2) * 1.2 - 0.6, 0.0, (data.index / 2) * 1.2).rotated(Vector3.UP, start.yaw)
+	player.position = start.pos + offset
+	player.rotation.y = start.yaw
 	if data.id == multiplayer.get_unique_id():
 		local_player = player
 		player.ready.connect(func() -> void:
@@ -489,6 +521,10 @@ func _weapon(weapon: String, origin: Vector3, direction: Vector3) -> void:
 	direction = direction.normalized()
 	for monster in weapon_targets(rule, origin, direction):
 		_apply_hit(monster, rule)
+	var attacker := players_root.get_node_or_null(str(_sender())) as Player
+	if attacker != null:
+		for victim in player_targets(rule, origin, direction, attacker):
+			_hit_player(victim, attacker, weapon, rule)
 	var end := _wall_point(origin, direction, rule.range)
 	# The boomerang clangs where it lands; everything else is loud where you stand.
 	GameNoise.emit_local(get_tree(), end if weapon == "boomerang" else origin, rule.noise, GameNoise.Kind.IMPACT)
@@ -539,6 +575,51 @@ func weapon_targets(rule: Dictionary, origin: Vector3, direction: Vector3) -> Ar
 		if not rule.get("pierce", false):
 			break
 	return result
+
+
+## Scavengers from other squads a weapon hits (nobody, in a one-squad match).
+func player_targets(rule: Dictionary, origin: Vector3, direction: Vector3, attacker: Player) -> Array[Player]:
+	var result: Array[Player] = []
+	if rule.get("player", 0.0) <= 0.0 and not rule.has("cone"):
+		return result
+	var reach: float = rule.range
+	var wall_distance := origin.distance_to(_wall_point(origin, direction, reach))
+	var hits := []
+	for player in all_players():
+		if player == attacker or player.squad == attacker.squad or not player.is_active():
+			continue
+		var base := player.global_position
+		var chest := base + Vector3.UP * 1.0
+		if rule.has("cone"):
+			var to := chest - origin
+			if to.length() < reach and direction.dot(to.normalized()) > rule.cone \
+					and MonsterKit.clear_line(get_world_3d(), origin, chest):
+				result.append(player)
+			continue
+		var t := (chest - origin).dot(direction)
+		if t < 0.0 or t > wall_distance:
+			continue
+		var point := origin + direction * t
+		if Vector2(point.x - base.x, point.z - base.z).length() < 0.45 and point.y > base.y - 0.1 and point.y < base.y + 1.9:
+			hits.append([t, player])
+	hits.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
+	for hit in hits:
+		result.append(hit[1])
+		if not rule.get("pierce", false):
+			break
+	return result
+
+
+func _hit_player(victim: Player, attacker: Player, weapon: String, rule: Dictionary) -> void:
+	var weapon_name: String = Gear.info(weapon).get("name", weapon)
+	var damage: float = rule.get("player", 0.0)
+	if damage <= 0.0:
+		# The megaphone only deafens: a jolt and a ringing in the ears.
+		MonsterKit.tell(victim, &"remote_damage", [5.0, "被擴音器震死了", "%s 對你大吼，耳朵嗡嗡作響！" % attacker.display_name])
+		return
+	var cause := "被%s的 %s（%s）打死了" % [Session.SQUAD_NAMES[attacker.squad], attacker.display_name, weapon_name]
+	MonsterKit.tell(victim, &"remote_damage", [damage, cause, "你被 %s 的%s打中了！" % [attacker.display_name, weapon_name]])
+	MonsterKit.tell(attacker, &"remote_warn", ["打中了 %s！" % victim.display_name, 0.0])
 
 
 func _apply_hit(monster: Node3D, rule: Dictionary) -> void:
