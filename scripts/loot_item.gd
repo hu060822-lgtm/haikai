@@ -125,8 +125,9 @@ func interact(player: Player) -> void:
 	if carry != null:
 		# Bulky: hold E (Player._update_grab) rather than a tap.
 		return
+	# The owner checks the backpack grid first; the host only decides who gets it.
 	if not player.can_carry(data):
-		player.message.emit("太重了，背不動")
+		player.say_bag_full(data)
 		return
 	# The host decides who gets it, so two players can't grab the same item.
 	if Run.instance != null:

@@ -251,15 +251,22 @@ func _physics_process(_delta: float) -> void:
 func _input(event: InputEvent) -> void:
 	if run == null:
 		return
-	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+	if event.is_action_pressed("inventory") and not event.is_echo():
+		if hud.bag_open or (run_active and player != null and player.is_active()):
+			set_bag_open(not hud.bag_open)
+		get_viewport().set_input_as_handled()
+	elif event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		if run_active and player != null:
 			player.look(event.relative)
 	elif event.is_action_pressed("ui_cancel"):
-		_capture_mouse(false)
+		if hud.bag_open:
+			set_bag_open(false)
+		else:
+			_capture_mouse(false)
 	elif event.is_action_pressed("toggle_mic"):
 		VoiceChat.muted = not VoiceChat.muted
 		_refresh_voice()
-	elif event is InputEventMouseButton and event.pressed:
+	elif event is InputEventMouseButton and event.pressed and not hud.bag_open:
 		if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 			_capture_mouse(true)
 			get_viewport().set_input_as_handled()
@@ -269,6 +276,8 @@ func _input(event: InputEvent) -> void:
 
 func _on_local_finished(result: Dictionary) -> void:
 	run_active = false
+	if hud.bag_open:
+		set_bag_open(false)
 	last_result = result
 	hud.set_extract_progress(0.0)
 	_refresh_voice()
@@ -339,6 +348,14 @@ func _on_run_ended(summary: Dictionary) -> void:
 		else:
 			show_loadout())
 	_set_menu(screen)
+
+
+## Tab: the backpack grid. The run keeps going; the mouse works the grid while it's open.
+func set_bag_open(open: bool) -> void:
+	if hud == null:
+		return
+	hud.toggle_bag(open)
+	_capture_mouse(not open)
 
 
 # --- Helpers --------------------------------------------------------------------------

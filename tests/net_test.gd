@@ -113,6 +113,8 @@ func _client() -> void:
 	item.interact(player)
 	_check(await _wait(func() -> bool: return player.items.size() == 1), "client picks up an item through the host")
 	_check(player.carried_value == value, "picked item has the right value")
+	_check(player.items[0].has("bag") and GridBag.placed_cells(player.items[0]).size() == GridBag.footprint(player.items[0]).size()
+		and player.bag_cells.size() == GridBag.CELLS, "the granted item is placed in the client's own grid backpack")
 	_check(await _wait(func() -> bool: return get_nodes_in_group("loot").size() == loot_before - 1),
 		"picked item disappears for the client")
 

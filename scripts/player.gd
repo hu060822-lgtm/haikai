@@ -26,7 +26,8 @@ const CROUCH_HEIGHT := 0.9
 const RADIUS := 0.3
 const EYE_OFFSET := 0.15
 const MAX_HEALTH := 100.0
-const MAX_CARRY_WEIGHT := 30.0
+## Backpack weight at which you're slowed the most (the grid, not kg, limits what fits).
+const FULL_LOAD := 30.0
 const INTERACT_DISTANCE := 2.2
 const MOUSE_SENSITIVITY := 0.0025
 const STAMINA_DRAIN := 0.25
@@ -45,7 +46,9 @@ const SPRING_JUMP_MULT := 1.42  # sqrt(2): double jump height
 const VOICE_RATE := 11025.0
 const HOT_INTERVAL := 2.5
 const HOT_DAMAGE := 3.0
-const EXO_EXTRA_CARRY := 15.0
+## The exoskeleton takes the weight: it slows you as if this much were the most.
+const EXO_FULL_LOAD := 45.0
+const BAG_FULL_MESSAGE := "包包塞不下"
 const IRON_LUNG_DRAIN := 0.67
 const GLIDE_FALL_SPEED := 1.2
 const HEART_RANGE := 15.0
@@ -78,6 +81,11 @@ const BULKY_DROP_DAMAGE := 15.0
 const FAKE_RADIO := ["快來這邊…", "我找到出口了，跟著我的聲音。", "你身後…不，沒事。", "別相信其他人。"]
 
 var items: Array[Dictionary] = []
+## This run's backpack: the cells of its random shape (see GridBag). Each item in items
+## remembers where it sits (data.bag).
+var bag_cells: Array[Vector2i] = []
+## The backpack screen is open (the mouse works the grid, not the gun).
+var bag_open := false
 ## The bulky item in this player's hands (set on every peer by BulkyCarry), or null.
 var held_bulky: LootItem = null:
 	set(value):
@@ -208,6 +216,8 @@ var trap_slow_factor := 1.0
 
 func _ready() -> void:
 	add_to_group("player")
+	if bag_cells.is_empty():
+		bag_cells = GridBag.generate(hash(str(name)))
 	collision_layer = Layers.WORLD
 	collision_mask = Layers.WORLD | Layers.WALKWAY | Layers.MONSTER
 	_shape = CapsuleShape3D.new()
@@ -591,13 +601,20 @@ func set_viewed(viewed: bool) -> void:
 	_body.visible = not viewed and not is_multiplayer_authority()
 
 
+## Whether it fits somewhere in the backpack grid (bulky hauls never do: two hands).
 func can_carry(data: Dictionary) -> bool:
-	return carried_weight + data.weight <= max_carry(self)
+	return GridBag.find_spot(bag_cells, items, data) != GridBag.NONE
 
 
-## How much a player can carry (the exoskeleton adds to it).
-static func max_carry(player: Player) -> float:
-	return MAX_CARRY_WEIGHT + (EXO_EXTRA_CARRY if player != null and player.has_gear("exoskeleton") else 0.0)
+## "包包塞不下": what didn't fit, how big it is, and where to make room.
+func say_bag_full(data: Dictionary) -> void:
+	var size := GridBag.footprint_size(data)
+	message.emit("%s「%s」（%d×%d）　Tab 整理背包" % [BAG_FULL_MESSAGE, data.get("name", "?"), size.x, size.y])
+
+
+## The backpack weight that slows a player the most (the exoskeleton raises it).
+static func full_load(player: Player) -> float:
+	return EXO_FULL_LOAD if player != null and player.has_gear("exoskeleton") else FULL_LOAD
 
 
 ## The host tells the owner they were caught by something.
@@ -806,7 +823,7 @@ func _physics_process(delta: float) -> void:
 		return
 	if held_bulky != null and not is_instance_valid(held_bulky):
 		held_bulky = null
-	if held_bulky != null and (Input.is_action_just_pressed("interact") or Input.is_action_just_pressed("drop")):
+	if held_bulky != null and (Input.is_action_just_pressed("interact") or (Input.is_action_just_pressed("drop") and not bag_open)):
 		release_bulky()
 		_grab_hold = -1.0  # don't start grabbing it again until E is let go
 	else:
@@ -814,20 +831,25 @@ func _physics_process(delta: float) -> void:
 		if Input.is_action_just_pressed("interact") and is_instance_valid(_focused):
 			_focused.interact(self)
 			_focused = null
-		if Input.is_action_just_pressed("drop"):
+		if Input.is_action_just_pressed("drop") and not bag_open:
 			drop_last()
 	if Input.is_action_just_pressed("lantern"):
 		set_lantern(not lantern_on)
 	if Input.is_action_just_pressed("use_boost"):
 		use_boost()
-	if Input.is_action_just_pressed("use_item"):
+	if Input.is_action_just_pressed("use_item") and not bag_open:
 		use_item()
 
 
+## Puts loot in the backpack, in the first place its footprint fits (any rotation).
+## Refuses (and says so) when it fits nowhere.
 func pickup(data: Dictionary) -> bool:
-	if not can_carry(data):
-		message.emit("太重了，背不動")
+	var spot := GridBag.find_spot(bag_cells, items, data)
+	if spot == GridBag.NONE:
+		say_bag_full(data)
 		return false
+	data = data.duplicate(true)
+	data.bag = spot
 	items.append(data)
 	_recalculate()
 	if data.has("note"):
@@ -838,9 +860,15 @@ func pickup(data: Dictionary) -> bool:
 
 
 func drop_last() -> void:
-	if items.is_empty():
+	drop_item(items.size() - 1)
+
+
+## Throws one backpack item on the floor in front of you.
+func drop_item(index: int) -> void:
+	if index < 0 or index >= items.size():
 		return
-	var data: Dictionary = items.pop_back()
+	var data: Dictionary = items.pop_at(index)
+	data.erase("bag")
 	_recalculate()
 	var at := _camera.global_position - _camera.global_basis.z * 0.8
 	var velocity_out := -_camera.global_basis.z * 2.0
@@ -851,6 +879,19 @@ func drop_last() -> void:
 		get_parent().add_child(item)
 		item.global_position = at
 		item.linear_velocity = velocity_out
+
+
+## Moves a backpack item to another place in the grid (corner at origin, turned `turns`
+## quarter-turns). False, and nothing moves, if it doesn't fit there.
+func bag_move(index: int, origin: Vector2i, turns: int) -> bool:
+	if index < 0 or index >= items.size():
+		return false
+	var cells := GridBag.rotated(GridBag.footprint(items[index]), turns)
+	if not GridBag.fits(bag_cells, GridBag.occupancy(items, index), cells, origin):
+		return false
+	items[index].bag = Vector3i(origin.x, origin.y, posmod(turns, 4))
+	_recalculate()
+	return true
 
 
 ## Empties the backpack and returns what was in it (used by extraction), plus the bulky
@@ -1088,7 +1129,7 @@ func _update_weapon(delta: float) -> void:
 		if reloading <= 0.0:
 			reloading = 0.0
 			_finish_reload()
-	var can_act := input_enabled and not is_dead and held_bulky == null
+	var can_act := input_enabled and not is_dead and held_bulky == null and not bag_open
 	aiming = can_act and reloading <= 0.0 and (force_aim or Input.is_action_pressed("aim"))
 	var held := can_act and (hold_trigger or Input.is_action_pressed("use_weapon"))
 	var pressed := held and not _trigger_was_held
@@ -1321,6 +1362,12 @@ func _update_hot_items(delta: float) -> void:
 
 
 func _recalculate() -> void:
+	# Anything that got into the backpack without a place (an old save, a script) gets one.
+	for i in items.size():
+		if not items[i].has("bag"):
+			var spot := GridBag.find_spot(bag_cells, items, items[i], i)
+			if spot != GridBag.NONE:
+				items[i].bag = spot
 	carried_weight = 0.0
 	carried_value = 0
 	var ids := PackedInt32Array()
@@ -1357,7 +1404,7 @@ func _gear_weight() -> float:
 
 func _weight_factor() -> float:
 	var total_load := carried_weight + _gear_weight()
-	return 1.0 - 0.4 * clampf(total_load / max_carry(self), 0.0, 1.0)
+	return 1.0 - 0.4 * clampf(total_load / full_load(self), 0.0, 1.0)
 
 
 func _update_stamina(sprinting: bool, delta: float) -> void:

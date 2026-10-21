@@ -238,6 +238,10 @@ func _far_patrol_point() -> Vector3:
 
 func host_spawn_loot(item: Dictionary, pos: Vector3, rot := 0.0, frozen := true, velocity := Vector3.ZERO) -> LootItem:
 	_loot_counter += 1
+	if item.has("bag"):
+		# Its place in someone's backpack grid means nothing on the floor.
+		item = item.duplicate(true)
+		item.erase("bag")
 	var node: LootItem = _loot_spawner.spawn({
 		"name": "L%d" % _loot_counter, "item": item, "pos": pos, "rot": rot, "frozen": frozen,
 	})
@@ -254,6 +258,8 @@ func _spawn_player(data: Dictionary) -> Node:
 	player.display_name = data.name
 	player.squad = data.get("squad", 0)
 	player.set_multiplayer_authority(data.id)
+	# Each scavenger's own random backpack shape for this run (see GridBag).
+	player.bag_cells = GridBag.generate(hash([seed, int(data.id)]))
 	player.build_sync()
 	var start := squad_start(data.get("slot", 0))
 	var offset := Vector3((data.index % 2) * 1.2 - 0.6, 0.0, (data.index / 2) * 1.2).rotated(Vector3.UP, start.yaw)
@@ -389,7 +395,7 @@ func _grant_item(data: Dictionary, at: Vector3) -> void:
 	if local_player != null and local_player.pickup(data):
 		Sfx.play_3d(self, at, "pickup", -6.0)
 	elif local_player != null:
-		# Couldn't carry it after all (weight changed meanwhile): put it back.
+		# It no longer fits the backpack grid (something else went in meanwhile): put it back.
 		request_drop(data, at, Vector3.ZERO)
 
 
