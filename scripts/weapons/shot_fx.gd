@@ -69,19 +69,31 @@ static func flash_mesh(size := 0.12) -> ArrayMesh:
 	return st.commit()
 
 
-static func muzzle_flash(parent: Node, pos: Vector3, dir: Vector3, color := Color(1.0, 0.75, 0.3), size := 0.14) -> void:
-	if parent == null or not parent.is_inside_tree():
+## How big a gun's muzzle flash is, from its flash stat (Arsenal.stats): 1 for an
+## ordinary 50, 0 (none at all) under 5. Dragon's breath doubles it: it lights the room.
+static func flash_strength(stats: Dictionary) -> float:
+	var flash := float(stats.get("flash", 50.0))
+	if flash < 5.0:
+		return 0.0
+	var dragon: bool = Arsenal.part(stats.get("parts", {}).get("ammo", "")).get("effects", {}).has("light")
+	return flash / 50.0 * (2.0 if dragon else 1.0)
+
+
+## A muzzle flash; strength (flash_strength) scales its size and light, 0 shows nothing.
+static func muzzle_flash(parent: Node, pos: Vector3, dir: Vector3, color := Color(1.0, 0.75, 0.3), size := 0.14,
+		strength := 1.0) -> void:
+	if parent == null or not parent.is_inside_tree() or strength <= 0.0:
 		return
 	var flash := MeshInstance3D.new()
-	flash.mesh = flash_mesh(size)
+	flash.mesh = flash_mesh(size * clampf(sqrt(strength), 0.3, 2.0))
 	flash.material_override = glow(color)
 	_place(parent, flash, pos)
 	_aim(flash, dir)
 	flash.rotate_object_local(Vector3.FORWARD, randf() * TAU)
 	var light := OmniLight3D.new()
 	light.light_color = color
-	light.light_energy = 2.5
-	light.omni_range = 5.0
+	light.light_energy = 2.5 * minf(strength, 4.0)
+	light.omni_range = 5.0 * clampf(sqrt(strength), 0.4, 2.0)
 	flash.add_child(light)
 	_no_shadow(flash)
 	_expire(flash, 0.06)
@@ -343,10 +355,13 @@ static func attach_bubble(monster: Node3D, seconds: float, radius := 0.8) -> voi
 	_expire(bubble, seconds)
 
 
-## The bang of a shot, by frame. Suppressed guns go "thup".
-static func fire_sound(parent: Node, pos: Vector3, frame: String, quiet: bool) -> void:
+## The bang of a shot, by frame. Suppressed guns go "thup"; a supersonic bullet still
+## cracks through the air (crack).
+static func fire_sound(parent: Node, pos: Vector3, frame: String, quiet: bool, crack := false) -> void:
 	if quiet:
 		Sfx.play_3d(parent, pos, "thump", -6.0, 18.0, randf_range(1.7, 1.9))
+		if crack:
+			Sfx.play_3d(parent, pos, "bang", -10.0, 45.0, randf_range(2.1, 2.4))
 		return
 	match frame:
 		"smg":
