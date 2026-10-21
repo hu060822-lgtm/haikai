@@ -14,6 +14,7 @@ const CONTROLS := [
 	["空白", "跳"], ["E", "撿起／互動"], ["G", "丟下"], ["F", "提燈"],
 	["左鍵", "開槍"], ["右鍵", "瞄準"], ["R", "換彈"], ["V", "小刀"],
 	["Q", "強化"], ["X", "用物品"], ["Tab", "背包"], ["M", "麥克風"],
+	["B", "射擊模式"],
 ]
 const HIT_TIME := 0.28
 
@@ -29,7 +30,11 @@ var _weapon_name: Label
 var _ammo: Label
 var _reserve: Label
 var _reload_bar: ProgressBar
+## Barrel heat, shown only for guns that heat up.
+var _heat_bar: ProgressBar
 var _weapon_hint: Label
+## White-out from another player's strobe light.
+var _whiteout: ColorRect
 var _prompt: Label
 var _prompt_key: PanelContainer
 var _prompt_key_label: Label
@@ -85,6 +90,11 @@ func _ready() -> void:
 	_vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_vignette)
 	_vignette.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_whiteout = ColorRect.new()
+	_whiteout.color = Color(1.0, 1.0, 0.96, 0.0)
+	_whiteout.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_whiteout)
+	_whiteout.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	_root = Control.new()
 	_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -339,6 +349,10 @@ func _build_bottom_right() -> void:
 	_reload_bar.size_flags_horizontal = Control.SIZE_SHRINK_END
 	_reload_bar.modulate.a = 0.0
 	weapon_box.add_child(_reload_bar)
+	_heat_bar = _bar(UiKit.HOT, Vector2(170.0, 3.0))
+	_heat_bar.size_flags_horizontal = Control.SIZE_SHRINK_END
+	_heat_bar.visible = false
+	weapon_box.add_child(_heat_bar)
 	_weapon_hint = _text("R 換彈　V 小刀　右鍵 瞄準", 12, UiKit.DIM)
 	_weapon_hint.size_flags_horizontal = Control.SIZE_SHRINK_END
 	weapon_box.add_child(_weapon_hint)
@@ -484,6 +498,8 @@ func _process(delta: float) -> void:
 			_toast.visible = false
 
 	_flash = maxf(_flash - delta * 0.6, 0.0)
+	var blinded := _player.blinded if _player != null and is_instance_valid(_player) else 0.0
+	_whiteout.color.a = clampf(blinded / Player.STROBE_BLIND, 0.0, 1.0) * 0.92
 	var low := 0.0
 	if _health_ratio > 0.0 and _health_ratio < 0.35:
 		low = (0.35 - _health_ratio) * (0.9 + 0.5 * sin(_clock * 5.0))
@@ -582,16 +598,28 @@ func _update_weapon(delta: float) -> void:
 		return
 	_weapon_panel.visible = true
 	var stats: Dictionary = player.weapon
-	_weapon_name.text = Arsenal.name_of(player.build.frame)
+	_weapon_name.text = "%s　%s" % [Arsenal.name_of(player.build.frame), Arsenal.MODE_NAMES.get(player.fire_mode, player.fire_mode)]
 	_ammo.text = str(player.mag_ammo)
 	_reserve.text = "/ %d" % player.reserve_ammo
 	var empty := player.mag_ammo <= 0
 	_ammo.add_theme_color_override("font_color", UiKit.DANGER if empty else (UiKit.WARN if player.mag_ammo <= maxi(int(stats.mag) / 4, 1) else UiKit.TEXT))
 	var bar := 0.0
+	var alarm := empty and player.reloading <= 0.0
+	var good := false
 	if player.reloading > 0.0:
-		bar = 1.0 - player.reloading / maxf(float(stats.reload), 0.01)
+		bar = 1.0 - player.reloading / maxf(player.reload_time, 0.01)
 		_set_bar_color(_reload_bar, UiKit.WARN)
-		_weapon_hint.text = "換彈中…"
+		_weapon_hint.text = "換彈中…" if player.reload_time <= float(stats.reload) else "換彈中…（空倉，要拉槍機）"
+	elif player.clearing > 0.0:
+		bar = 1.0 - player.clearing / maxf(player.clear_time, 0.01)
+		_set_bar_color(_reload_bar, UiKit.DANGER)
+		_weapon_hint.text = "清除卡彈中…"
+	elif player.jammed:
+		_weapon_hint.text = Player.JAM_MESSAGE
+		alarm = true
+	elif player.overheated:
+		_weapon_hint.text = "過熱了！等它冷卻"
+		alarm = true
 	elif player.charge > 0.0:
 		bar = player.charge
 		_set_bar_color(_reload_bar, UiKit.COLD)
@@ -600,11 +628,18 @@ func _update_weapon(delta: float) -> void:
 		_weapon_hint.text = "沒子彈了！按 R 換彈"
 	elif empty:
 		_weapon_hint.text = "子彈打光了。只剩小刀（V）"
+	elif player.bipod_ready():
+		_weapon_hint.text = "腳架架好了"
+		good = true
 	else:
-		_weapon_hint.text = "R 換彈　V 小刀　右鍵 瞄準" if stats.kind != "charge" else "按住左鍵充能　V 小刀"
-	_weapon_hint.add_theme_color_override("font_color", UiKit.DANGER if empty and player.reloading <= 0.0 else UiKit.DIM)
+		_weapon_hint.text = "R 換彈　V 小刀　右鍵 瞄準　B 模式" if stats.kind != "charge" else "按住左鍵充能　V 小刀"
+	_weapon_hint.add_theme_color_override("font_color", UiKit.DANGER if alarm else (UiKit.GOOD if good else UiKit.DIM))
 	_reload_bar.value = bar
 	_reload_bar.modulate.a = 1.0 if bar > 0.0 else 0.0
+	_heat_bar.visible = float(stats.get("heat", 0.0)) > 0.0
+	_heat_bar.value = clampf(player.heat, 0.0, 1.0)
+	if _heat_bar.visible and player.heat > 0.0:
+		_set_bar_color(_heat_bar, UiKit.DANGER if player.overheated else (UiKit.WARN if player.heat > Player.HOT_SPREAD else UiKit.HOT))
 	_update_crosshair(player.current_spread(), player.view_fov(), player.aiming)
 
 

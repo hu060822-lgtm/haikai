@@ -244,7 +244,7 @@ func _test_effects() -> void:
 	run.add_child(ear)
 	var origin := player.global_position + Vector3.UP * 1.5
 	var aim := Vector3(0, -0.3, -1).normalized()
-	var stats := Arsenal.stats({"frame": "revolver", "parts": {"muzzle": "screamer_mask"}})
+	var stats := Arsenal.stats({"frame": "revolver", "parts": {"barrel": "threaded_barrel", "muzzle": "screamer_mask"}})
 	run.host_fire(stats, origin, [aim], player)
 	var landing := run._wall_point(origin, aim, float(stats.range))
 	_check(ear.heard_near(landing, GameNoise.Kind.VOICE, Organs.SCREAM_RADIUS - 0.1), "the screamer's mask makes the hit spot scream")
@@ -253,7 +253,7 @@ func _test_effects() -> void:
 		if (entry[0] as Vector3).distance_to(origin) < 0.1:
 			muzzle_loud = maxf(muzzle_loud, entry[1])
 	_check(muzzle_loud < Arsenal.frame("revolver").noise * 0.5, "while the gun itself stays quiet (%.1f m)" % muzzle_loud)
-	var quiet := Arsenal.stats({"frame": "revolver", "parts": {"muzzle": "stalker_shadow"}})
+	var quiet := Arsenal.stats({"frame": "revolver", "parts": {"barrel": "threaded_barrel", "muzzle": "stalker_shadow"}})
 	_check(quiet.noise < 3.0, "the stalker's shadow makes shots almost silent")
 	run.host_fire(Arsenal.stats({"frame": "revolver", "parts": {"ammo": "spitter_sac"}}), origin, [aim], player)
 	await _frames(2)

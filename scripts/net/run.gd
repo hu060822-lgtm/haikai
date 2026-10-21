@@ -98,7 +98,7 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	time_left = maxf(time_left - delta, 0.0)
-	if _is_host() and not _burning.is_empty():
+	if _is_host() and not (_burning.is_empty() and _bleeding.is_empty()):
 		_host_burn(delta)
 	if time_left <= 0.0 and local_player != null and local_player.is_active():
 		local_player.die(level.timeout_cause)
@@ -481,17 +481,27 @@ const KNIFE_REACH := 2.3
 const KNIFE_DAMAGE := 12.0
 const KNIFE_PLAYER := 15.0
 const BURN_DPS := 6.0
+## Bleeding hurts like burning at this share, without the fire.
+const BLEED_SHARE := 0.7
+## Hitscan damage falls off from the weapon's falloff distance to this share at its range.
+const FALLOFF_MIN := 0.6
 const CHAIN_REACH := 6.0
 const SAW_SEEK := 8.0
 const LURE_RADIUS := 18.0
 const FLAME_CONE := 0.92  # cos of the flame jet's half angle (about 23 degrees)
 const ARC_CONE := 0.95
 ## Effects that only matter to the shooter's machine, never to what is hit.
-const LOCAL_EFFECTS := ["light", "thermal", "bayonet", "ghost", "motion_sight", "squeal", "guard", "fang"]
+const LOCAL_EFFECTS := ["light", "thermal", "bayonet", "ghost", "motion_sight", "squeal", "guard", "fang",
+	"night", "laser", "laser_ir", "strobe", "bipod", "canted", "suppressed", "tracer", "quick_clear"]
 ## Effects that only change the numbers; a hit with nothing else is a plain (bullet) hit.
 const MODIFIER_EFFECTS := ["soft", "armor", "leech", "bounty", "lure", "scream", "hush", "lullaby"]
 
 var _burning := {}  # monster -> {"time", "tick", "attacker"}
+var _bleeding := {}  # the same, for bleeding
+## Host: the finished stats (Arsenal.stats) of the last shot it resolved, and how many
+## projectiles it had.
+var last_shot: Dictionary = {}
+var last_shot_pellets := 0
 
 
 ## A direction inside a cone of the given half-angle (degrees) around forward.
@@ -525,10 +535,12 @@ func _shot(build: Dictionary, origin: Vector3, directions: Array) -> void:
 
 ## Host: carries out one shot of a finished weapon (Arsenal.stats) by its kind.
 func host_fire(stats: Dictionary, origin: Vector3, directions: Array, attacker: Player = null) -> void:
-	var effects: Dictionary = {}
-	for effect in stats.effects:
-		if not effect in LOCAL_EFFECTS:
-			effects[effect] = stats.effects[effect]
+	last_shot = stats
+	last_shot_pellets = directions.size()
+	var effects := _hit_effects(stats)
+	# The muzzle flash lights the shooter up for light-sensing monsters.
+	if attacker != null:
+		attacker.shot_lit = maxf(attacker.shot_lit, Player.shot_light_time(stats))
 	var rule := {"range": float(stats.range), "pierce": effects.get("pierce", false)}
 	var damage: float = stats.damage
 	var aim: Vector3 = (directions[0] as Vector3).normalized()
@@ -593,17 +605,21 @@ func host_fire(stats: Dictionary, origin: Vector3, directions: Array, attacker: 
 				var end := _wall_point(origin, dir, rule.range)
 				var hits := weapon_hits(rule, origin, dir)
 				for hit in hits:
-					to_monsters[hit[1]] = to_monsters.get(hit[1], 0.0) + damage
+					to_monsters[hit[1]] = to_monsters.get(hit[1], 0.0) + damage * falloff_factor(stats, float(hit[0]))
 					if not rule.pierce:
 						end = origin + dir * float(hit[0])
 						break
 				if attacker != null:
 					for victim in player_targets(rule, origin, dir, attacker):
-						to_players[victim] = to_players.get(victim, 0.0) + damage
+						var reach := origin.distance_to(victim.global_position + Vector3.UP)
+						to_players[victim] = to_players.get(victim, 0.0) + damage * falloff_factor(stats, reach)
 				segments.append([origin, end])
 				impacts.append(end)
+	# Bullets, bolts and blades only count against a large monster's hide as far as they get through.
+	var through: float = pen_factor(float(stats.get("pen", 20.0))) if stats.kind in ["hitscan", "charge", "bounce"] else 1.0
 	for monster in to_monsters:
-		host_damage_monster(monster, to_monsters[monster], effects, origin, attacker)
+		var amount: float = to_monsters[monster] * (through if _size_of(monster) == "large" else 1.0)
+		host_damage_monster(monster, amount, effects, origin, attacker)
 	var weapon_name := Arsenal.name_of(stats.frame)
 	for victim in to_players:
 		_hit_player(victim, attacker, to_players[victim] * PVP_SCALE, weapon_name)
@@ -614,9 +630,41 @@ func host_fire(stats: Dictionary, origin: Vector3, directions: Array, attacker: 
 		if effects.get("lure", false):
 			GameNoise.emit_local(get_tree(), landing, LURE_RADIUS, GameNoise.Kind.ITEM)
 		Organs.host_impact(self, effects, landing, attacker)
-	var quiet: bool = stats.parts.get("muzzle", "") == "suppressor"
+	var quiet: bool = stats.get("suppressed", false)
+	var style := {"flash": ShotFx.flash_strength(stats), "tracer": stats.effects.has("tracer"),
+		"crack": quiet and stats.get("supersonic", false) and stats.kind == "hitscan"}
 	var shooter_name := String(attacker.name) if attacker != null else ""
-	_shot_fx.rpc(shooter_name, str(stats.frame), str(stats.kind), quiet, segments, impacts, effects.get("lure", false))
+	_shot_fx.rpc(shooter_name, str(stats.frame), str(stats.kind), quiet, segments, impacts, effects.get("lure", false), style)
+
+
+## What a shot carries to what it hits: the build's effects minus the shooter-only ones.
+## A blade under the barrel makes stabs bleed, not bullets.
+func _hit_effects(stats: Dictionary) -> Dictionary:
+	var effects: Dictionary = {}
+	for effect in stats.effects:
+		if not effect in LOCAL_EFFECTS:
+			effects[effect] = stats.effects[effect]
+	var parts: Dictionary = stats.get("parts", {})
+	if Arsenal.part(parts.get("underbarrel", "")).get("effects", {}).has("bleed") \
+			and not Arsenal.part(parts.get("ammo", "")).get("effects", {}).has("bleed") \
+			and not Arsenal.frame(stats.frame).get("effects", {}).has("bleed"):
+		effects.erase("bleed")
+	return effects
+
+
+## Share of a hitscan hit's damage left at a distance: all of it up to the weapon's
+## falloff, then down to FALLOFF_MIN at its range.
+static func falloff_factor(stats: Dictionary, distance: float) -> float:
+	var reach := float(stats.range)
+	var start := float(stats.get("falloff", reach))
+	if distance <= start or reach <= start:
+		return 1.0
+	return lerpf(1.0, FALLOFF_MIN, clampf((distance - start) / (reach - start), 0.0, 1.0))
+
+
+## How much of a hit counts against a large monster, by the weapon's penetration (0-100).
+static func pen_factor(pen: float) -> float:
+	return lerpf(0.6, 1.3, clampf(pen / 100.0, 0.0, 1.0))
 
 
 ## The saw blade: flies straight, ricochets off up to three walls, and after biting a
@@ -662,13 +710,31 @@ func _saw_path(origin: Vector3, aim: Vector3, rule: Dictionary, damage: float, c
 		from = end + wall.normal * 0.05
 
 
-## A knife stab (V), or a bayonet thrust.
-func request_melee(origin: Vector3, direction: Vector3, bayonet: bool, fang := false) -> void:
-	_to_host(&"_melee", [origin, direction, bayonet, fang])
+## A strobing gun light caught another player in the eyes.
+func request_strobe(victim: Player) -> void:
+	_to_host(&"_strobe", [String(victim.name)])
 
 
 @rpc("any_peer", "call_local", "reliable")
-func _melee(origin: Vector3, direction: Vector3, bayonet: bool, fang := false) -> void:
+func _strobe(victim_name: String) -> void:
+	if not _is_host():
+		return
+	var attacker := players_root.get_node_or_null(str(_sender())) as Player
+	var victim := players_root.get_node_or_null(victim_name) as Player
+	if attacker == null or victim == null or attacker == victim or not attacker.is_active() or not victim.is_active():
+		return
+	if attacker.global_position.distance_to(victim.global_position) > Player.STROBE_RANGE + 2.0:
+		return
+	MonsterKit.tell(victim, &"remote_strobe", [Player.STROBE_BLIND])
+
+
+## A knife stab (V), or a bayonet thrust.
+func request_melee(origin: Vector3, direction: Vector3, bayonet: bool, fang := false, bleed := 0.0) -> void:
+	_to_host(&"_melee", [origin, direction, bayonet, fang, bleed])
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _melee(origin: Vector3, direction: Vector3, bayonet: bool, fang := false, bleed := 0.0) -> void:
 	if not _is_host():
 		return
 	var attacker := players_root.get_node_or_null(str(_sender())) as Player
@@ -684,6 +750,8 @@ func _melee(origin: Vector3, direction: Vector3, bayonet: bool, fang := false) -
 		# The hound's jaw: three times the knife, and what it bites slows down.
 		strength = 3.0
 		effects["slow"] = 1.5
+	if bleed > 0.0:
+		effects["bleed"] = bleed
 	var hits := weapon_hits(rule, origin, direction)
 	if not hits.is_empty():
 		var monster: Node3D = hits[0][1]
@@ -774,6 +842,7 @@ func host_damage_monster(monster: Node3D, amount: float, effects: Dictionary, fr
 			host_spawn_loot(LootTable.roll(rng, luck, level.loot_pool), monster.global_position + Vector3.UP * 0.6, 0.0, false)
 		Organs.host_drop(self, monster, false)
 		_burning.erase(monster)
+		_bleeding.erase(monster)
 		_kill_monster(monster)
 	return dealt
 
@@ -802,6 +871,11 @@ func _apply_effects(monster: Node3D, size: String, effects: Dictionary, from_pos
 		burning.attacker = attacker
 		_burning[monster] = burning
 		_status_fx.rpc(String(monster.name), "burn", seconds)
+	if effects.has("bleed") and float(effects.bleed) > 0.0:
+		var bleeding: Dictionary = _bleeding.get(monster, {"time": 0.0, "tick": 0.5})
+		bleeding.time = maxf(bleeding.time, float(effects.bleed))
+		bleeding.attacker = attacker
+		_bleeding[monster] = bleeding
 	if effects.has("bubble"):
 		var seconds := float(effects.bubble)
 		match size:
@@ -820,22 +894,27 @@ func _apply_effects(monster: Node3D, size: String, effects: Dictionary, from_pos
 				TimeWarp.slow(monster, 0.5)
 
 
-## Host: burning monsters keep taking damage.
+## Host: burning and bleeding monsters keep taking damage.
 func _host_burn(delta: float) -> void:
-	for monster in _burning.keys():
+	_host_dot(_burning, delta, BURN_DPS, "burn")
+	_host_dot(_bleeding, delta, BURN_DPS * BLEED_SHARE, "bleed")
+
+
+func _host_dot(wounded: Dictionary, delta: float, dps: float, effect: String) -> void:
+	for monster in wounded.keys():
 		if not is_instance_valid(monster) or monster.is_queued_for_deletion():
-			_burning.erase(monster)
+			wounded.erase(monster)
 			continue
-		var burning: Dictionary = _burning[monster]
-		burning.time -= delta
-		burning.tick -= delta
-		if burning.tick <= 0.0:
-			burning.tick = 0.5
-			var attacker = burning.get("attacker")
-			host_damage_monster(monster, BURN_DPS * 0.5, {"burn": 0.0, "dot": true}, monster.global_position,
+		var wound: Dictionary = wounded[monster]
+		wound.time -= delta
+		wound.tick -= delta
+		if wound.tick <= 0.0:
+			wound.tick = 0.5
+			var attacker = wound.get("attacker")
+			host_damage_monster(monster, dps * 0.5, {effect: 0.0, "dot": true}, monster.global_position,
 				attacker if is_instance_valid(attacker) else null)
-		if burning.time <= 0.0:
-			_burning.erase(monster)
+		if wound.time <= 0.0:
+			wounded.erase(monster)
 
 
 ## A large monster ran out of health: it goes down for a long while (and can react).
@@ -843,6 +922,7 @@ func _break_monster(monster: Node3D) -> void:
 	TimeWarp.stun(monster, BREAK_STUN)
 	awakening.host_break(monster.global_position)
 	_burning.erase(monster)
+	_bleeding.erase(monster)
 	if monster.has_method("on_broken"):
 		monster.on_broken()
 	_monster_broken.rpc(monster.global_position)
@@ -1047,7 +1127,10 @@ func _wall_hit(origin: Vector3, direction: Vector3, reach: float) -> Dictionary:
 
 ## Every peer: the bang, the muzzle flash at the shooter's gun, tracers and sparks.
 @rpc("authority", "call_local", "unreliable")
-func _shot_fx(shooter_name: String, frame: String, kind: String, quiet: bool, segments: Array, impacts: Array, lure: bool) -> void:
+## style: "flash" (ShotFx.flash_strength), "tracer" (glowing tracer rounds), "crack"
+## (a suppressed but supersonic bullet still cracks).
+func _shot_fx(shooter_name: String, frame: String, kind: String, quiet: bool, segments: Array, impacts: Array, lure: bool,
+		style := {}) -> void:
 	var shooter := players_root.get_node_or_null(shooter_name) as Player if shooter_name != "" else null
 	var muzzle: Vector3 = segments[0][0] if not segments.is_empty() else Vector3.ZERO
 	var aim := Vector3.FORWARD
@@ -1056,12 +1139,13 @@ func _shot_fx(shooter_name: String, frame: String, kind: String, quiet: bool, se
 		aim = shooter.look_direction()
 	if not segments.is_empty():
 		aim = ((segments[0][1] as Vector3) - (segments[0][0] as Vector3)).normalized()
-	ShotFx.fire_sound(self, muzzle, frame, quiet)
+	ShotFx.fire_sound(self, muzzle, frame, quiet, style.get("crack", false))
 	var own := shooter != null and shooter == local_player
 	if own:
 		awakening.shot_woke.emit(0.4 if quiet else 1.0)  # the HUD's eye flinches
 	if not own and kind != "cone":
-		ShotFx.muzzle_flash(self, muzzle, aim, Color(0.6, 0.85, 1.0) if kind == "arc" else Color(1.0, 0.75, 0.3))
+		ShotFx.muzzle_flash(self, muzzle, aim, Color(0.6, 0.85, 1.0) if kind == "arc" else Color(1.0, 0.75, 0.3), 0.14,
+			float(style.get("flash", 1.0)))
 	match kind:
 		"cone":
 			ShotFx.flames(self, muzzle, aim, (segments[0][0] as Vector3).distance_to(segments[0][1]) if not segments.is_empty() else 6.0)
@@ -1082,13 +1166,19 @@ func _shot_fx(shooter_name: String, frame: String, kind: String, quiet: bool, se
 		_:
 			var color := Color(0.6, 0.9, 1.0) if kind == "charge" else (Color(0.8, 1.0, 1.0, 0.7) if frame == "bubble_gun" else Color(1.0, 0.85, 0.5))
 			var width := 0.07 if kind == "charge" else (0.03 if frame in ["harpoon", "crossbow"] else 0.016)
+			var life := 0.3 if kind == "charge" else 0.07
+			# Tracer rounds glow red-orange and hang in the air: everyone sees where they came from.
+			if style.get("tracer", false):
+				color = Color(1.0, 0.35, 0.12)
+				width = maxf(width, 0.04)
+				life = maxf(life, 0.35)
 			for segment in segments:
 				var end: Vector3 = segment[1]
 				var from := muzzle
 				# Your own tracer starts a little out from the barrel so it doesn't fill the screen.
 				if own:
 					from = muzzle + (end - muzzle).normalized() * minf(1.2, muzzle.distance_to(end) * 0.5)
-				ShotFx.tracer(self, from, end, color, width, 0.3 if kind == "charge" else 0.07)
+				ShotFx.tracer(self, from, end, color, width, life)
 			for at in impacts:
 				ShotFx.impact(self, at, Color(1.0, 0.8, 0.4), 4)
 	if lure:

@@ -58,6 +58,22 @@ const CHARGE_TIME := 2.0
 const KNIFE_COOLDOWN := 0.55
 const AIM_WALK := 0.6
 const BASE_FOV := 70.0
+## Gun handling (see Arsenal.stats): a jam is cleared with R, an overheated gun fires
+## again once it cools under OVERHEAT_CLEAR, and above HOT_SPREAD heat it scatters more.
+const CLEAR_TIME := 1.0
+const QUICK_CLEAR_TIME := 0.6
+const OVERHEAT_CLEAR := 0.5
+const HOT_SPREAD := 0.6
+const JAM_MESSAGE := "卡彈了！按 R 清除"
+const HOT_MESSAGE := "過熱了！"
+## Standing this still (m/s) while aiming sets a bipod down.
+const BIPOD_STILL := 0.3
+const LASER_RANGE := 40.0
+## A strobing gun light dazzles players this close in its beam, every STROBE_INTERVAL.
+const STROBE_RANGE := 12.0
+const STROBE_CONE := 0.93
+const STROBE_INTERVAL := 0.3
+const STROBE_BLIND := 0.6
 const CAT_EYE_TIME := 30.0
 const REWIND_TIME := 5.0
 const REWIND_STEP := 0.25
@@ -113,7 +129,7 @@ var lantern_on := true:
 		if _lantern != null:
 			_lantern.visible = value
 			_lantern_glow.visible = value
-			_gun_light.visible = value and weapon.get("effects", {}).has("light")
+			_gun_light.visible = value and Player.rail_effect(weapon, "light")
 var display_name := "拾荒者"
 ## Which squad this scavenger is in (set by the spawner on every peer). See Session.SQUADS.
 var squad := 0
@@ -130,14 +146,36 @@ var aiming := false
 ## Scripts and tests can hold the trigger or the aim button without real input.
 var hold_trigger := false
 var force_aim := false
+## The fire mode the trigger is in: one of weapon.modes (B cycles them).
+var fire_mode := "semi"
+## 0 at the hip, 1 with the sights all the way up (it takes weapon.aim_time).
+var aim_blend := 0.0
+## The gun jammed: it won't fire until R clears it (clearing = seconds left on that).
+var jammed := false
+var clearing := 0.0
+var clear_time := CLEAR_TIME
+## Barrel heat: at 1.0 the gun overheats and won't fire until it cools under OVERHEAT_CLEAR.
+var heat := 0.0
+var overheated := false
+## Seconds the reload in progress takes in all (an empty gun takes longer).
+var reload_time := 0.0
+## Seconds the muzzle flash still lights this player up, on the owner and on the host
+## (which sets it when it resolves the shot): light-sensing monsters see it (is_lit).
+var shot_lit := 0.0
+## Seconds of white-out left from someone's strobe light (the HUD draws it).
+var blinded := 0.0
 ## Replicated: the build as JSON, so other players see the gun in this player's hand.
 var gun_code := "":
 	set(value):
 		gun_code = value
+		var parsed = JSON.parse_string(value) if value != "" else null
+		code_stats = Arsenal.stats(parsed) if parsed is Dictionary else {}
 		_show_body_gun()
-## A light bolted under the barrel, on whenever the lantern is (light-seeking monsters notice either).
+## The replicated build's finished stats, on every peer (gun light, laser dot).
+var code_stats: Dictionary = {}
+## A light on a rail, on whenever the lantern is (light-seeking monsters notice either).
 var gun_light_on: bool:
-	get: return lantern_on and gun_code.contains("flashlight")
+	get: return lantern_on and Player.rail_effect(code_stats, "light")
 var boosts: Array[String] = []
 ## Replicated: what's in the backpack, so the host's monsters can react to it.
 var carried_ids := PackedInt32Array()
@@ -179,6 +217,10 @@ var _fire_cooldown := 0.0
 var _melee_cooldown := 0.0
 var _trigger_was_held := false
 var _shot_count := 0
+var _burst_left := 0
+var _aim_sway_time := 0.0
+var _strobe_timer := 0.0
+var _laser_dot: MeshInstance3D
 var _recoil := 0.0
 var _bloom := 0.0
 var _view: ViewModel
@@ -275,6 +317,21 @@ func _ready() -> void:
 	_candle.position = Vector3(-0.2, -0.25, -0.3)
 	_candle.visible = false
 	_camera.add_child(_candle)
+
+	# The laser's red dot, placed in the world every frame (everyone sees it).
+	_laser_dot = MeshInstance3D.new()
+	_laser_dot.name = "LaserDot"
+	var dot_mesh := SphereMesh.new()
+	dot_mesh.radius = 0.025
+	dot_mesh.height = 0.05
+	dot_mesh.radial_segments = 6
+	dot_mesh.rings = 3
+	_laser_dot.mesh = dot_mesh
+	_laser_dot.material_override = ShotFx.glow(Color(1.0, 0.08, 0.05))
+	_laser_dot.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_laser_dot.top_level = true
+	_laser_dot.visible = false
+	add_child(_laser_dot)
 
 	_ray = RayCast3D.new()
 	_ray.target_position = Vector3(0.0, 0.0, -INTERACT_DISTANCE)
@@ -625,6 +682,8 @@ func remote_die(cause: String) -> void:
 
 
 func _process(delta: float) -> void:
+	shot_lit = maxf(shot_lit - delta, 0.0)
+	_update_laser()
 	if is_multiplayer_authority():
 		return
 	# Remote players: pose the body from replicated state.
@@ -657,6 +716,15 @@ func equip(loadout: Dictionary) -> void:
 	charge = 0.0
 	_fire_cooldown = 0.0
 	_shot_count = 0
+	_burst_left = 0
+	_recoil = 0.0
+	_bloom = 0.0
+	aim_blend = 0.0
+	fire_mode = str(weapon.modes[0])
+	jammed = false
+	clearing = 0.0
+	heat = 0.0
+	overheated = false
 	boosts.clear()
 	for id in loadout.get("boosts", []):
 		boosts.append(id)
@@ -997,9 +1065,15 @@ func _on_held_changed() -> void:
 	_recalculate()
 
 
-## Whether monsters see this player as lit: lantern on, or on a map with no shadows.
+## Whether monsters see this player as lit: lantern on, a muzzle flash a moment ago, or
+## on a map with no shadows.
 func is_lit() -> bool:
-	return lantern_on or (Run.instance != null and Run.instance.level != null and Run.instance.level.bright)
+	return lantern_on or shot_lit > 0.0 or (Run.instance != null and Run.instance.level != null and Run.instance.level.bright)
+
+
+## Seconds a shot's muzzle flash lights the shooter up (dragon's breath lights the room).
+static func shot_light_time(stats: Dictionary) -> float:
+	return ShotFx.flash_strength(stats) * 50.0 / 100.0 * 0.4
 
 
 func set_lantern(on: bool) -> void:
@@ -1009,13 +1083,24 @@ func set_lantern(on: bool) -> void:
 # --- Weapon: the build's gun and the knife ------------------------------------------
 
 ## One pull of the trigger. Host resolves what it hits (Run.request_shot). False when
-## it didn't fire (cooling down, reloading, empty: an empty pull starts a reload).
+## it didn't fire (cooling down, reloading, jammed, overheated, empty: an empty pull
+## starts a reload). In "double" mode both barrels go off at once.
 func fire() -> bool:
-	if weapon.is_empty() or reloading > 0.0 or _fire_cooldown > 0.0 or is_dead:
+	if weapon.is_empty() or reloading > 0.0 or clearing > 0.0 or _fire_cooldown > 0.0 or is_dead:
 		return false
 	if _bitten > 0.0:
 		message.emit("手被咬住了，開不了槍！")
 		_fire_cooldown = 0.5
+		return false
+	if jammed:
+		_fire_cooldown = 0.3
+		Sfx.play_2d(self, "tick", -6.0, 0.8)
+		message.emit(JAM_MESSAGE)
+		return false
+	if overheated:
+		_fire_cooldown = 0.4
+		Sfx.play_2d(self, "hiss", -12.0, 1.6)
+		message.emit(HOT_MESSAGE)
 		return false
 	if mag_ammo <= 0:
 		_fire_cooldown = 0.3
@@ -1025,37 +1110,72 @@ func fire() -> bool:
 		else:
 			message.emit("%s沒有子彈了。只剩小刀（V）。" % Arsenal.name_of(build.frame))
 		return false
+	# Every shot can jam, worse when the barrel is hot.
+	if _shot_rng.randf() < float(weapon.get("jam", 0.0)) * (1.0 + heat * 3.0):
+		jammed = true
+		_burst_left = 0
+		_fire_cooldown = 0.3
+		Sfx.play_2d(self, "tick", -2.0, 0.7)
+		message.emit(JAM_MESSAGE)
+		return false
 	_fire_cooldown = 1.0 / maxf(weapon.rate, 0.05)
-	_shot_count += 1
+	var rounds := 2 if fire_mode == "double" and mag_ammo >= 2 else 1
 	var ghost := int(weapon.effects.get("ghost", 0))
-	if ghost <= 0 or _shot_count % ghost != 0:
-		mag_ammo -= 1
+	for i in rounds:
+		_shot_count += 1
+		if ghost <= 0 or _shot_count % ghost != 0:
+			mag_ammo -= 1
 	var origin := _camera.global_position
 	var forward := -_camera.global_basis.z
 	var spread := current_spread()
 	var directions: Array[Vector3] = []
-	for i in int(weapon.pellets):
+	for i in int(weapon.pellets) * rounds:
 		directions.append(Run.scatter(forward, spread, _shot_rng))
 	if Run.instance != null:
 		Run.instance.request_shot(build, origin, directions)
-	var kick: float = weapon.recoil * (0.6 if aiming else 1.0)
+	if float(weapon.get("heat", 0.0)) > 0.0:
+		heat += float(weapon.heat) * rounds
+		if heat >= 1.0 and not overheated:
+			overheated = true
+			_burst_left = 0
+			Sfx.play_2d(self, "hiss", -6.0, 1.4)
+			message.emit(HOT_MESSAGE)
+	shot_lit = maxf(shot_lit, Player.shot_light_time(weapon))
+	# Recoil: up by weapon.recoil, sideways by up to recoil_h. Aiming and a set bipod
+	# keep it down; both barrels at once kick harder.
+	var steady := lerpf(1.0, 0.6, aim_blend) * bipod_factor()
+	var kick: float = weapon.recoil * steady * (1.6 if rounds == 2 else 1.0)
 	_recoil = minf(_recoil + kick, 25.0)
 	_bloom = minf(_bloom + kick * 0.35 + weapon.spread * 0.15, 8.0)
-	rotate_y(deg_to_rad(_shot_rng.randf_range(-1.0, 1.0) * kick * 0.15))
+	rotate_y(deg_to_rad(_shot_rng.randf_range(-1.0, 1.0) * float(weapon.recoil_h) * steady))
 	add_shake(clampf(kick * 0.03, 0.0, 0.35))
 	if _view != null:
-		_view.kick(weapon.recoil, weapon.kind != "cone")
+		_view.kick(kick, ShotFx.flash_strength(weapon) if weapon.kind != "cone" else 0.0)
 	return true
 
 
-## R: refill the magazine from the reserve.
+## R: refill the magazine from the reserve, or clear a jam (that comes first).
 func reload() -> bool:
-	if weapon.is_empty() or reloading > 0.0 or mag_ammo >= int(weapon.mag) or reserve_ammo <= 0 or is_dead:
+	if weapon.is_empty() or reloading > 0.0 or clearing > 0.0 or is_dead:
 		return false
-	reloading = weapon.reload
+	if jammed:
+		clear_time = QUICK_CLEAR_TIME if weapon.effects.has("quick_clear") else CLEAR_TIME
+		clearing = clear_time
+		charge = 0.0
+		_burst_left = 0
+		if _view != null:
+			_view.reload(clear_time)
+		Sfx.play_3d(get_parent(), global_position, "clank", -12.0, 12.0, 1.8)
+		return true
+	if mag_ammo >= int(weapon.mag) or reserve_ammo <= 0:
+		return false
+	# Empty: the action has to be racked as well.
+	reload_time = float(weapon.reload) * (Arsenal.EMPTY_RELOAD if mag_ammo <= 0 else 1.0)
+	reloading = reload_time
 	charge = 0.0
+	_burst_left = 0
 	if _view != null:
-		_view.reload(weapon.reload)
+		_view.reload(reload_time)
 	Sfx.play_3d(get_parent(), global_position, "clank", -12.0, 12.0, 1.5)
 	GameNoise.emit(get_tree(), global_position, 4.0, GameNoise.Kind.TOOL)
 	return true
@@ -1066,6 +1186,20 @@ func _finish_reload() -> void:
 	mag_ammo += take
 	reserve_ammo -= take
 	Sfx.play_3d(get_parent(), global_position, "clank", -10.0, 12.0, 2.0)
+
+
+## B: the next fire mode the gun has.
+func cycle_fire_mode() -> void:
+	if weapon.is_empty():
+		return
+	var modes: Array = weapon.modes
+	if modes.size() < 2:
+		message.emit("這把槍只有「%s」" % Arsenal.MODE_NAMES.get(fire_mode, fire_mode))
+		return
+	fire_mode = str(modes[(modes.find(fire_mode) + 1) % modes.size()])
+	_burst_left = 0
+	Sfx.play_2d(self, "tick", -8.0, 1.6)
+	message.emit("射擊模式：%s" % Arsenal.MODE_NAMES.get(fire_mode, fire_mode))
 
 
 ## V: the knife. Pries open lockers (and pokes mimics) when you're looking at one;
@@ -1079,8 +1213,9 @@ func melee() -> bool:
 	_melee_cooldown = KNIFE_COOLDOWN
 	if _view != null:
 		_view.stab()
-	if reloading > 0.0:
+	if reloading > 0.0 or clearing > 0.0:
 		reloading = 0.0
+		clearing = 0.0
 		if _view != null:
 			_view.cancel_reload()
 	Sfx.play_3d(get_parent(), global_position, "thump", -14.0, 10.0, 2.2)
@@ -1089,18 +1224,45 @@ func melee() -> bool:
 		_focused.pry(self)
 		return true
 	if Run.instance != null:
-		Run.instance.request_melee(_camera.global_position, -_camera.global_basis.z, weapon.get("effects", {}).has("bayonet"),
-				weapon.get("effects", {}).has("fang"))
+		var effects: Dictionary = weapon.get("effects", {})
+		# A blade under the barrel (the spike bayonet) makes what it stabs bleed.
+		var blade: Dictionary = Arsenal.part(weapon.get("parts", {}).get("underbarrel", "")).get("effects", {})
+		Run.instance.request_melee(_camera.global_position, -_camera.global_basis.z, effects.has("bayonet"),
+				effects.has("fang"), float(blade.get("bleed", 0.0)))
 	return true
 
 
-## Degrees of random cone the next shot gets: aiming halves it, moving and firing widen it.
+## Degrees of random cone the next shot gets: the hip spread, narrowing to the aimed
+## cone (weapon.aim_spread) as the sights come up; moving, a hot barrel and firing widen it.
 func current_spread() -> float:
 	if weapon.is_empty():
 		return 0.0
-	var base: float = weapon.spread * (0.5 if aiming else 1.0)
+	var base := lerpf(float(weapon.spread), float(weapon.get("aim_spread", weapon.spread * 0.5)), aim_blend)
 	var moving := clampf(ground_speed / SPRINT_SPEED, 0.0, 1.0)
-	return base * (1.0 + moving * 0.8) + _bloom * (0.5 if aiming else 1.0)
+	var hot := 1.0 + heat * 0.5 if heat > HOT_SPREAD else 1.0
+	return base * (1.0 + moving * 0.8) * hot + _bloom * lerpf(1.0, 0.5, aim_blend)
+
+
+## A bipod is set: aiming, all the way up, standing still on the floor.
+func bipod_ready() -> bool:
+	return weapon.get("effects", {}).has("bipod") and aiming and aim_blend > 0.5 \
+		and ground_speed < BIPOD_STILL and is_on_floor()
+
+
+## Recoil and sway left with the bipod set (the grip pod's little legs do less).
+func bipod_factor() -> float:
+	if not bipod_ready():
+		return 1.0
+	return 0.5 if weapon.get("parts", {}).get("foregrip", "") == "grip_pod" else 0.3
+
+
+## Whether a rail part of this build (Arsenal.stats) has an effect: the gun light is a
+## lamp on a rail (the dragon's breath glow is the shot, not a lamp).
+static func rail_effect(stats: Dictionary, effect: String) -> bool:
+	for slot in ["rail_l", "rail_r"]:
+		if Arsenal.part(stats.get("parts", {}).get(slot, "")).get("effects", {}).has(effect):
+			return true
+	return false
 
 
 ## The camera's field of view right now (narrower while aiming a zoomed sight).
@@ -1118,19 +1280,33 @@ func muzzle_position() -> Vector3:
 	return head_position()
 
 
-## Trigger, aim, reload and knife input, charging, recoil recovery. Owner only.
+## Trigger (by fire mode), aim, reload and knife input, charging, recoil recovery, jams
+## and heat. Owner only.
 func _update_weapon(delta: float) -> void:
 	_fire_cooldown = maxf(_fire_cooldown - delta, 0.0)
 	_melee_cooldown = maxf(_melee_cooldown - delta, 0.0)
-	_recoil = move_toward(_recoil, 0.0, delta * (5.0 + _recoil * 5.0))
+	_recoil = move_toward(_recoil, 0.0, delta * (5.0 + _recoil * 5.0) * float(weapon.get("recovery", 1.0)))
 	_bloom = move_toward(_bloom, 0.0, delta * (2.0 + _bloom * 3.0))
+	blinded = maxf(blinded - delta, 0.0)
+	if heat > 0.0:
+		heat = maxf(heat - float(weapon.get("cooling", 0.5)) * delta, 0.0)
+		if overheated and heat < OVERHEAT_CLEAR:
+			overheated = false
+			message.emit("槍管冷下來了。")
 	if reloading > 0.0:
 		reloading -= delta
 		if reloading <= 0.0:
 			reloading = 0.0
 			_finish_reload()
+	if clearing > 0.0:
+		clearing -= delta
+		if clearing <= 0.0:
+			clearing = 0.0
+			jammed = false
+			Sfx.play_3d(get_parent(), global_position, "clank", -10.0, 12.0, 2.2)
 	var can_act := input_enabled and not is_dead and held_bulky == null and not bag_open
-	aiming = can_act and reloading <= 0.0 and (force_aim or Input.is_action_pressed("aim"))
+	aiming = can_act and reloading <= 0.0 and clearing <= 0.0 and (force_aim or Input.is_action_pressed("aim"))
+	aim_blend = move_toward(aim_blend, 1.0 if aiming else 0.0, delta / maxf(float(weapon.get("aim_time", 0.25)), 0.05))
 	var held := can_act and (hold_trigger or Input.is_action_pressed("use_weapon"))
 	var pressed := held and not _trigger_was_held
 	_trigger_was_held = held
@@ -1138,10 +1314,13 @@ func _update_weapon(delta: float) -> void:
 		reload()
 	if can_act and Input.is_action_just_pressed("melee"):
 		melee()
+	if can_act and Input.is_action_just_pressed("fire_mode"):
+		cycle_fire_mode()
 	if weapon.is_empty():
 		return
 	if weapon.kind == "charge":
-		if held and mag_ammo > 0 and reloading <= 0.0 and _fire_cooldown <= 0.0 and _bitten <= 0.0:
+		if held and mag_ammo > 0 and reloading <= 0.0 and clearing <= 0.0 and _fire_cooldown <= 0.0 and _bitten <= 0.0 \
+				and not jammed and not overheated:
 			if charge == 0.0:
 				Sfx.play_2d(self, "zap", -8.0, 0.5)
 			charge = minf(charge + delta / CHARGE_TIME, 1.0)
@@ -1153,12 +1332,87 @@ func _update_weapon(delta: float) -> void:
 			charge = 0.0
 			if pressed:
 				fire()
-	elif pressed or (held and weapon.auto):
-		fire()
+	else:
+		match fire_mode:
+			"auto":
+				if held:
+					fire()
+			"burst":
+				if pressed and _burst_left == 0:
+					_burst_left = int(weapon.get("burst", Arsenal.BURST))
+			_:
+				if pressed:
+					fire()
+		# A burst keeps going at the gun's rate once started, even if the trigger lets go.
+		if _burst_left > 0 and _fire_cooldown <= 0.0:
+			_burst_left = _burst_left - 1 if fire() else 0
 	if _view != null:
-		_view.aiming = aiming
+		_view.aim = aim_blend
+	_update_strobe(delta)
 	_update_thermal(delta)
 	_update_organ_sight(delta)
+
+
+## The laser's red dot where the barrel points, on every peer (the infrared laser
+## shows nothing).
+func _update_laser() -> void:
+	if _laser_dot == null:
+		return
+	var on: bool = code_stats.get("effects", {}).has("laser") and is_active() and held_bulky == null and is_inside_tree()
+	if not on:
+		_laser_dot.visible = false
+		return
+	var from := _camera.global_position
+	var to := from - _camera.global_basis.z * LASER_RANGE
+	var query := PhysicsRayQueryParameters3D.create(from, to, Layers.WORLD | Layers.WALKWAY | Layers.MONSTER, [get_rid()])
+	var hit := get_world_3d().direct_space_state.intersect_ray(query)
+	_laser_dot.visible = not hit.is_empty()
+	if not hit.is_empty():
+		_laser_dot.global_position = hit.position + hit.normal * 0.01
+
+
+## A strobing gun light, aimed with the light on: any other player caught close in its
+## beam is dazzled (the host tells them).
+func _update_strobe(delta: float) -> void:
+	if not (aiming and lantern_on and Player.rail_effect(weapon, "strobe")):
+		_strobe_timer = 0.0
+		if _gun_light != null:
+			_gun_light.light_energy = 2.4
+		return
+	_gun_light.light_energy = 6.0 if fmod(_aim_sway_time, 0.12) < 0.06 else 0.3
+	_strobe_timer -= delta
+	if _strobe_timer > 0.0:
+		return
+	_strobe_timer = STROBE_INTERVAL
+	for other in strobe_targets():
+		if Run.instance != null:
+			Run.instance.request_strobe(other)
+
+
+## Other players in this player's strobe beam right now.
+func strobe_targets() -> Array[Player]:
+	var found: Array[Player] = []
+	var eye := _camera.global_position
+	var forward := -_camera.global_basis.z
+	for node in get_tree().get_nodes_in_group("player"):
+		var other := node as Player
+		if other == null or other == self or not other.is_active():
+			continue
+		var to := other.head_position() - eye
+		if to.length() < STROBE_RANGE and forward.dot(to.normalized()) > STROBE_CONE \
+				and MonsterKit.clear_line(get_world_3d(), eye, other.head_position(), [get_rid()]):
+			found.append(other)
+	return found
+
+
+## Host -> owner: someone's strobe light caught you in the eyes.
+@rpc("any_peer", "call_local", "reliable")
+func remote_strobe(seconds: float) -> void:
+	if not _from_host() or is_dead:
+		return
+	if blinded <= 0.0:
+		message.emit("被強光閃得看不見了！")
+	blinded = maxf(blinded, seconds)
 
 
 ## A thermal sight shows every monster through walls (and the invisible ones) while aiming.
@@ -1446,16 +1700,25 @@ func _update_head(delta: float, moving: bool, speed: float) -> void:
 	_head.position.y = lerpf(_head.position.y, target_height + bob, 12.0 * delta)
 	_shake = maxf(_shake - delta * 1.5, 0.0)
 	_camera.position = Vector3(randf_range(-1, 1), randf_range(-1, 1), 0.0) * _shake * 0.08
-	# Recoil kicks the view up; it settles back as the gun recovers.
-	_camera.rotation.x = deg_to_rad(_recoil)
+	# Recoil kicks the view up; it settles back as the gun recovers. While aiming, the
+	# sights wander by the gun's sway (less crouched, hardly at all on a bipod).
+	_aim_sway_time += delta
+	var drift := Vector2.ZERO
+	if aim_blend > 0.0 and not weapon.is_empty():
+		var wander := float(weapon.get("sway", 0.0)) * aim_blend * (0.5 if is_crouching else 1.0) * bipod_factor()
+		var t := _aim_sway_time
+		drift = Vector2(sin(t * 0.83) + sin(t * 2.1 + 1.3) * 0.35, sin(t * 1.17 + 0.6) * 0.8 + sin(t * 2.7) * 0.3) * 0.75 * wander
+	_camera.rotation.x = deg_to_rad(_recoil + drift.y)
+	_camera.rotation.y = deg_to_rad(drift.x)
 	# A heavy haul sways the view side to side with every step, and a little when still.
 	var heft := clampf(bulky_load() / 90.0, 0.0, 1.0)
 	_sway_time += delta * (1.0 + speed * 1.1)
 	var sway := sin(_sway_time * 1.3) * heft
 	_camera.rotation.z = lerpf(_camera.rotation.z, deg_to_rad(sway * 4.5), minf(6.0 * delta, 1.0))
 	_camera.position += Vector3(sway * 0.05, -heft * 0.06 + absf(sway) * -0.03, 0.0)
-	var zoom: float = weapon.get("zoom", 1.0) if aiming else 1.0
-	_camera.fov = lerpf(_camera.fov, BASE_FOV / maxf(zoom, 1.0), minf(14.0 * delta, 1.0))
+	# Zoom follows the sights coming up (aim_blend).
+	var zoom := lerpf(1.0, maxf(float(weapon.get("zoom", 1.0)), 1.0), aim_blend)
+	_camera.fov = BASE_FOV / zoom
 
 
 func _update_focus() -> void:
@@ -1747,14 +2010,15 @@ func view_saturation() -> float:
 	return 0.0 if _cat_eye_after > 0.0 else 1.0
 
 
-## Post-shader brightness: above 1 means night vision (goggles, lantern off, not on a
-## map that's already bright).
+## Post-shader brightness: above 1 means night vision (goggles with the lantern off, or
+## aiming a night sight; not on a map that's already bright).
 func view_gain() -> float:
-	if not has_gear("night_goggles") or lantern_on or is_dead:
+	if is_dead or (Run.instance != null and Run.instance.level != null and Run.instance.level.bright):
 		return 1.0
-	if Run.instance != null and Run.instance.level.bright:
-		return 1.0
-	return 2.6
+	var gain := 2.6 if has_gear("night_goggles") and not lantern_on else 1.0
+	if weapon.get("effects", {}).has("night"):
+		gain = maxf(gain, lerpf(1.0, 2.6, aim_blend))
+	return gain
 
 
 ## Holding jump in the air with the feather cloak.

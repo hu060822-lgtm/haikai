@@ -7,6 +7,8 @@ extends SceneTree
 const PORT := 24555
 const SAFE_SPOT := Vector3(13.5, 6.1, 10.0)  # east catwalk, out of the colossus' reach
 const TIMEOUT_FRAMES := 1200
+## The client fires this tuned build; the host must work its shot out with the same tune.
+const TUNED := {"frame": "carbine", "parts": {"gas": "adjustable_gas"}, "tune": {"gas": -0.5}}
 
 var _failures := 0
 var _main: Node
@@ -78,6 +80,10 @@ func _host() -> void:
 	var remote := _remote_player()
 	_check(remote != null and remote.global_position.distance_to(SAFE_SPOT) < 2.0,
 		"client's movement replicates to the host (%s)" % (remote.global_position if remote else Vector3.ZERO))
+	_check(await _wait(func() -> bool: return _main.run.last_shot.get("tune", {}).get("gas", 0.0) == -0.5),
+		"the client's tuned build reaches the host with its tune")
+	_check(_main.run.last_shot.get("rate", 0.0) == Arsenal.stats(TUNED).rate and _main.run.last_shot.rate < Arsenal.FRAMES.carbine.rate,
+		"and the host's shot uses the tuned numbers (rate %.2f)" % _main.run.last_shot.get("rate", 0.0))
 	_check(await _wait(func() -> bool: return remote == null or not is_instance_valid(remote) or remote.is_dead),
 		"client's death replicates to the host")
 	_check(not _ended, "run keeps going while the host is alive")
@@ -156,6 +162,8 @@ func _client() -> void:
 	_check(await _wait(func() -> bool: return _main.run.awakening.stage == 1 and _main.run.awakening.level >= 34.0),
 		"the awakening's stage and level reach the client")
 	player.global_position = SAFE_SPOT
+	await _frames(30)
+	_main.run.request_shot(TUNED, player.head_position(), [Vector3.UP])
 	await _frames(30)
 	player.die("test")
 	_check(not _ended, "run waits for the host after the client dies")

@@ -686,7 +686,7 @@ const PARTS := {
 		"x": {"damage": 0.92, "velocity": 1.05}, "+": {"pen": 35.0}, "effects": {"pierce": true, "armor": true},
 		"desc": "鎢芯：打穿一排，對大型怪多 50% 傷害。"},
 	"subsonic": {"name": "亞音速彈", "slot": "ammo", "price": 70, "weight": 0.0, "fits": ["pistol", "rifle"],
-		"x": {"velocity": 0.7, "noise": 0.75, "damage": 0.88, "flash": 0.7, "recoil": 0.85, "range": 0.8},
+		"x": {"noise": 0.75, "damage": 0.88, "flash": 0.7, "recoil": 0.85, "range": 0.8}, "=": {"velocity": 320.0},
 		"desc": "比音速慢：配消音器時沒有破空聲，真正安靜。"},
 	"plus_p": {"name": "高壓彈 +P", "slot": "ammo", "price": 110, "weight": 0.0, "fits": ["pistol", "rifle"],
 		"x": {"damage": 1.15, "velocity": 1.1, "recoil": 1.2, "flash": 1.2}, "+": {"reliability": -3.0},

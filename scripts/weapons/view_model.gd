@@ -10,7 +10,8 @@ const SCALE := 0.6
 const HIP := Vector3(0.12, -0.14, -0.27)
 const AIM := Vector3(0.0, -0.083, -0.31)
 
-var aiming := false
+## How far the sights are up: the player's aim blend (0 hip, 1 aimed).
+var aim := 0.0
 var _rig: Node3D
 var _gun: Node3D
 var _knife: Node3D
@@ -61,7 +62,7 @@ func set_build(build: Dictionary) -> void:
 	if _gun != null:
 		_gun.queue_free()
 	_gun = GunModels.build(build)
-	_scoped = build.get("parts", {}).get("sight", "") in ["scope", "thermal"]
+	_scoped = float(Arsenal.stats(build).zoom) >= 2.0
 	_gun.scale = Vector3.ONE * SCALE
 	_rig.add_child(_gun)
 	_no_shadow(_gun)
@@ -83,12 +84,15 @@ func muzzle_global() -> Vector3:
 	return _gun.to_global(_muzzle)
 
 
-func kick(recoil: float, flash := true) -> void:
+## A shot went off: recoil in degrees, flash = ShotFx.flash_strength (0: no flash).
+func kick(recoil: float, flash := 1.0) -> void:
 	_kick = 1.0
 	_kick_strength = clampf(recoil / 4.0, 0.25, 2.5)
-	if flash:
+	if flash > 0.0:
 		_flash_time = 0.05
 		_flash.rotation.z = randf() * TAU
+		_flash.scale = Vector3.ONE * 0.6 * clampf(sqrt(flash), 0.3, 2.0)
+		_flash_light.light_energy = 2.2 * minf(flash, 4.0)
 
 
 func reload(seconds: float) -> void:
@@ -111,7 +115,7 @@ func _process(delta: float) -> void:
 	_flash_time = maxf(_flash_time - delta, 0.0)
 	_flash.visible = _flash_time > 0.0
 	_flash_light.visible = _flash_time > 0.0
-	_aim = move_toward(_aim, 1.0 if aiming and _reload <= 0.0 else 0.0, delta * 6.0)
+	_aim = clampf(aim, 0.0, 1.0)
 	# Sway: the gun lags behind how fast the view turns.
 	var basis_now := global_basis.orthonormalized()
 	var turned := _last_basis.inverse() * basis_now
