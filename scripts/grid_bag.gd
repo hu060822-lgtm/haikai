@@ -8,6 +8,10 @@ class_name GridBag
 ## Where an item sits is stored on the item itself: data.bag = Vector3i(x, y, rotation),
 ## so whatever takes items out of Player.items (a drop, rats, a living item escaping,
 ## using it up) frees its cells with no extra bookkeeping.
+##
+## Every scavenger also has a 保險箱: a fixed BOX_SIZE grid next to the bag. Items in it
+## stay in Player.items but sit at data.box instead of data.bag; they are paid out even
+## if you die, and nothing steals from it. The functions below take key "box" for it.
 
 const CELLS := 24
 const MAX_SIZE := Vector2i(8, 6)
@@ -15,6 +19,8 @@ const MAX_SIZE := Vector2i(8, 6)
 const CORE := 3
 const NONE := Vector3i(-1, -1, -1)
 const STYLES := ["long", "blob", "branchy"]
+## The secure container: 2 wide, 3 tall.
+const BOX_SIZE := Vector2i(2, 3)
 
 ## Hand-drawn footprints for odd shapes ("X" = a cell, one row per line). By item id, or by
 ## organ id for monster organs. Everything else is a rectangle from its size.
@@ -100,6 +106,20 @@ static func generate(seed: int) -> Array[Vector2i]:
 	for cell: Vector2i in cells:
 		result.append(cell)
 	return normalized(result)
+
+
+## The 保險箱's cells: a plain BOX_SIZE rectangle.
+static func box_shape() -> Array[Vector2i]:
+	var cells: Array[Vector2i] = []
+	for y in BOX_SIZE.y:
+		for x in BOX_SIZE.x:
+			cells.append(Vector2i(x, y))
+	return cells
+
+
+## Whether an item could go in an empty 保險箱 at all (in some rotation; never bulky).
+static func fits_box(data: Dictionary) -> bool:
+	return find_spot(box_shape(), [], data, -1, "box") != NONE
 
 
 ## The bag's width and height in cells.
@@ -200,24 +220,25 @@ static func footprint_size(data: Dictionary, turns := 0) -> Vector2i:
 
 # --- Placing ----------------------------------------------------------------------------
 
-## The grid cells an item occupies where it sits now (empty if it has no place).
-static func placed_cells(data: Dictionary) -> Array[Vector2i]:
+## The grid cells an item occupies where it sits now (empty if it has no place in that
+## grid: key "bag" for the backpack, "box" for the 保險箱).
+static func placed_cells(data: Dictionary, key := "bag") -> Array[Vector2i]:
 	var cells: Array[Vector2i] = []
-	if not data.has("bag"):
+	if not data.has(key):
 		return cells
-	var at: Vector3i = data.bag
+	var at: Vector3i = data[key]
 	for cell in rotated(footprint(data), at.z):
 		cells.append(Vector2i(at.x, at.y) + cell)
 	return cells
 
 
 ## Which item index sits on each cell: {Vector2i: index}. skip leaves one item out.
-static func occupancy(items: Array, skip := -1) -> Dictionary:
+static func occupancy(items: Array, skip := -1, key := "bag") -> Dictionary:
 	var taken := {}
 	for i in items.size():
 		if i == skip:
 			continue
-		for cell in placed_cells(items[i]):
+		for cell in placed_cells(items[i], key):
 			taken[cell] = i
 	return taken
 
@@ -236,10 +257,10 @@ static func fits(shape: Array[Vector2i], taken: Dictionary, cells: Array[Vector2
 ## edge or other loot), so quick pickups pack tight and leave room in one piece; ties go
 ## to the item's own orientation, then top-left first. skip ignores one carried item
 ## (the one being moved).
-static func find_spot(shape: Array[Vector2i], items: Array, data: Dictionary, skip := -1) -> Vector3i:
+static func find_spot(shape: Array[Vector2i], items: Array, data: Dictionary, skip := -1, key := "bag") -> Vector3i:
 	if LootTable.is_bulky(data):
 		return NONE
-	var taken := occupancy(items, skip)
+	var taken := occupancy(items, skip, key)
 	if shape.size() - taken.size() < footprint(data).size():
 		return NONE
 	var lookup := {}
@@ -277,5 +298,5 @@ static func find_spot(shape: Array[Vector2i], items: Array, data: Dictionary, sk
 
 
 ## Cells of the bag nothing sits on.
-static func free_cells(shape: Array[Vector2i], items: Array) -> int:
-	return shape.size() - occupancy(items).size()
+static func free_cells(shape: Array[Vector2i], items: Array, key := "bag") -> int:
+	return shape.size() - occupancy(items, -1, key).size()

@@ -189,6 +189,14 @@ static func record_extraction(earned: int, surviving_gear: Array) -> void:
 	save_game()
 
 
+## Dying with things in the 保險箱: its loot is still sold and its organs still kept.
+static func record_box(earned: int, organs: Array) -> void:
+	money += earned
+	for id in organs:
+		give_back(id)
+	save_game()
+
+
 static func record_death() -> void:
 	deaths += 1
 	# Never leave a broke player stuck with nothing: a free lantern run is always possible,

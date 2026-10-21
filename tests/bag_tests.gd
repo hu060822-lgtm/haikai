@@ -1,7 +1,8 @@
 extends RefCounted
 ## Smoke tests for the grid backpack: random bag shapes, item footprints, auto-placing and
 ## refusing, rotating, moving and dropping from the grid (also through the Tab screen),
-## monsters stealing out of it, and the weight slowdown with the exoskeleton.
+## monsters stealing out of it, the weight slowdown with the exoskeleton, and the 2x3
+## 保險箱 (moving in and out, what fits, paid out on death, safe from thieves).
 ## Called from tests/smoke_test.gd:
 ##   _failures += await load("res://tests/bag_tests.gd").new().run(self)
 
@@ -19,6 +20,10 @@ func run(scene_tree: SceneTree) -> int:
 	await _test_packing()
 	await _test_screen()
 	await _test_stealing()
+	await _test_box()
+	await _test_box_death()
+	await _test_box_extract()
+	await _test_box_woken()
 	return failures
 
 
@@ -196,8 +201,7 @@ func _test_screen() -> void:
 	player.pickup(LootTable.make(73))  # guitar: neck along the top, body under the end
 	player.pickup(LootTable.make(11))  # a key
 	var bag: BagScreen = main.hud.bag
-	_press_tab()
-	await _frames(2)
+	await _press_tab()
 	_check(bag.visible and player.bag_open and main.hud.bag_open, "Tab opens the backpack screen")
 	_check(not main.get_tree().paused, "the game keeps running behind it")
 	player.hold_trigger = true
@@ -252,8 +256,7 @@ func _test_screen() -> void:
 	bag.drop_hovered()
 	_check(player.items.size() == 1 and player.items[0].id != hovered_id, "G drops the item under the mouse")
 
-	_press_tab()
-	await _frames(2)
+	await _press_tab()
 	_check(not bag.visible and not player.bag_open, "Tab again closes it")
 	await _end_run(main)
 
@@ -294,6 +297,177 @@ func _test_stealing() -> void:
 	await _end_run(main)
 
 
+func _test_box() -> void:
+	var main = await _new_run()
+	var player: Player = main.player
+	player.take_all_items()
+	player.bag_cells.assign(_rect(4, 4))
+	_check(player.box_cells.size() == 6 and GridBag.extent(player.box_cells) == Vector2i(2, 3), "every scavenger has a 2x3 保險箱")
+	_check(GridBag.fits_box(LootTable.make(73)) and GridBag.fits_box(Organs.loot_data("hound_fang")),
+		"a 3-long piece fits it turned on end (the guitar, a hound fang)")
+	_check(not GridBag.fits_box(LootTable.make(83)) and not GridBag.fits_box(LootTable.make(101)),
+		"a 3x3 lump and bulky hauls never fit it")
+
+	# Pickup goes to the bag, never the box, even when the bag is full.
+	player.bag_cells.assign(_rect(2, 1))
+	player.pickup(LootTable.make(17))  # a bottle fills the 2x1 bag
+	var said: Array[String] = []
+	player.message.connect(func(text: String) -> void: said.append(text))
+	_check(not player.pickup(LootTable.make(11)) and _said_full(said) and GridBag.free_cells(player.box_cells, player.items, "box") == 6,
+		"a full bag still says 「包包塞不下」: the box only fills by hand")
+
+	# Bag -> box -> bag.
+	player.bag_cells.assign(_rect(4, 4))
+	player.pickup(LootTable.make(11))
+	_check(player.bag_move(0, Vector2i(0, 0), 1, true) and player.items[0].box == Vector3i(0, 0, 1) and not player.items[0].has("bag"),
+		"an item moves from the bag into the box")
+	_check(GridBag.occupancy(player.items).size() == 1 and GridBag.occupancy(player.items, -1, "box").size() == 2,
+		"it leaves the bag's cells and takes the box's")
+	_check(not player.bag_move(1, Vector2i(0, 1), 0, true), "the box refuses a spot that's taken")
+	_check(player.bag_move(0, Vector2i(2, 2), 0) and player.items[0].has("bag") and not player.items[0].has("box"),
+		"and moves back from the box to the bag")
+	player.take_all_items()
+	player.pickup(LootTable.make(83))  # the diving helmet, 3x3
+	_check(not player.box_put(0) and not player.bag_move(0, Vector2i(0, 0), 0, true) and player.items[0].has("bag"),
+		"too big for 2x3: it stays in the bag")
+	player.take_all_items()
+	player.pickup(LootTable.make(122))  # a 12 kg lead block
+	player.box_put(0)
+	_check(player.carried_weight == 12.0 and player.box_value == 35 and player.carried_value == 35, "box items still weigh, and count as carried value")
+	_check(main.hud._inventory.text.contains("保險箱 $35"), "the HUD shows the box's worth (%s)" % main.hud._inventory.text)
+
+	# Through the Tab screen: drag a key into the box, and back out.
+	player.take_all_items()
+	player.pickup(LootTable.make(11))
+	player.pickup(LootTable.make(83))
+	main.set_bag_open(true)
+	await _frames(2)
+	var bag: BagScreen = main.hud.bag
+	bag.point_at_cell(Vector2(GridBag.placed_cells(player.items[0])[0]) + Vector2(0.5, 0.5))
+	bag.begin_drag()
+	bag.point_at_box_cell(Vector2(1.5, 2.5))
+	_check(bag.drag_fits() and bag.end_drag() == "moved" and player.items[0].box == Vector3i(1, 2, 0), "drag an item into the box on the bag screen")
+	bag.point_at_box_cell(Vector2(1.5, 2.5))
+	_check(bag.hovered == 0 and bag._info_body.text.contains("保險箱"), "hovering it says it's in the box (%s)" % bag._info_body.text.replace("\n", " / "))
+	bag.turn()
+	_check(player.items[0].has("box"), "turning it in place keeps it in the box")
+	bag.begin_drag()
+	var free_cell := Vector2i(-1, -1)
+	for cell in player.bag_cells:
+		if not GridBag.occupancy(player.items).has(cell):
+			free_cell = cell
+	bag.point_at_cell(Vector2(free_cell) + Vector2(0.5, 0.5))
+	_check(bag.end_drag() == "moved" and player.items[0].has("bag"), "and drag it back into the bag")
+	bag.point_at_cell(Vector2(GridBag.placed_cells(player.items[1])[0]) + Vector2(0.5, 0.5))
+	bag.begin_drag()
+	bag.point_at_box_cell(Vector2(0.5, 0.5))
+	_check(not bag.drag_fits() and bag.end_drag() == "back" and player.items[1].has("bag"), "the helmet won't drop into the box")
+	# Letting go in the gap between the grids puts it back instead of throwing it away.
+	bag.point_at_cell(Vector2(GridBag.placed_cells(player.items[0])[0]) + Vector2(0.5, 0.5))
+	bag.begin_drag()
+	bag.point_at(bag._box_corner() - Vector2(BagScreen.BOX_GAP * 0.5, -20.0))
+	_check(bag.end_drag() == "back" and player.items.size() == 2, "letting go between the bag and the box puts it back")
+	main.set_bag_open(false)
+
+	# Thieves skip the box; G with the bag shut drops from the bag, not the box.
+	player.take_all_items()
+	for id in [11, 4, 1]:
+		player.pickup(LootTable.make(id))
+	player.box_put(0)
+	player.box_put(1)
+	seed(5)
+	for i in 4:
+		player.remote_rob()
+	_check(player.items.size() == 2 and player.items[0].has("box") and player.items[1].has("box"), "rats only tear things out of the bag, never the box")
+	player.drop_last()
+	_check(player.items.size() == 2, "G with nothing in the bag leaves the box alone")
+	player.pickup(LootTable.make(14))  # a living thing, in the box
+	player.box_put(2)
+	for i in 30:
+		player._alive_timer = 0.0
+		await _frames(1)
+	_check(player.carries(14), "living loot can't wriggle out of the box")
+	await _end_run(main)
+
+
+func _test_box_death() -> void:
+	GameState.reset()
+	GameState.money = 500
+	var main = await _new_run()
+	var player: Player = main.player
+	player.take_all_items()
+	player.bag_cells.assign(_rect(6, 4))
+	player.pickup(LootTable.make(1))   # gear $35, stays in the bag
+	player.pickup(LootTable.make(3))   # copper $45, stays in the bag
+	player.pickup(LootTable.make(11))  # key $25, into the box
+	player.pickup(Organs.loot_data("hound_fang"))
+	player.box_put(2)
+	player.box_put(3)
+	var loot_before: int = main.run.loot_root.get_child_count()
+	player.take_damage(1000.0, "測試")
+	await _frames(5)
+	var result: Dictionary = main.last_result
+	_check(not result.get("survived", true) and result.payout.get("total", 0) == 25 and GameState.money == 525,
+		"dying pays out the box (+$%d, money $%d)" % [result.payout.get("total", 0), GameState.money])
+	_check(GameState.owned("hound_fang") == 1 and result.get("organs", []) == ["hound_fang"], "an organ in the box goes to the stash")
+	_check(result.items.size() == 2 and main.run.loot_root.get_child_count() == loot_before + 2,
+		"only the bag spills with the body (%d items)" % result.items.size())
+	var spilled_box := false
+	for node in main.run.loot_root.get_children():
+		if node is LootItem and ((node as LootItem).data.id == 11 or (node as LootItem).data.has("organ")):
+			spilled_box = true
+	_check(not spilled_box, "the box's things aren't on the floor")
+	var screen := ResultScreen.new()
+	screen.survived = false
+	screen.cause = "測試"
+	screen.items = result.items
+	screen.payout = result.payout
+	screen.organs = result.organs
+	main.add_child(screen)
+	await _frames(1)
+	var texts := ""
+	for label in screen.find_children("*", "Label", true, false):
+		texts += (label as Label).text + "|"
+	_check(texts.contains("保險箱保住了：發條鑰匙") and texts.contains("$25"), "the death screen says what the box saved")
+	screen.queue_free()
+	await _end_run(main)
+
+
+func _test_box_extract() -> void:
+	GameState.reset()
+	var money := GameState.money
+	var main = await _new_run()
+	var player: Player = main.player
+	player.take_all_items()
+	player.bag_cells.assign(_rect(6, 4))
+	for id in [1, 3, 11, 4]:
+		player.pickup(LootTable.make(id))
+	player.box_put(2)
+	player.box_put(3)
+	main.run.local_extracted()
+	await _frames(3)
+	_check(main.last_result.payout.total == 125 and GameState.money == money + 125, "extracting pays the bag and the box ($%d)" % main.last_result.payout.total)
+	await _end_run(main)
+
+
+func _test_box_woken() -> void:
+	var main = await _new_run()
+	var player: Player = main.player
+	player.take_all_items()
+	player.bag_cells.assign(_rect(6, 4))
+	for id in [11, 4, 1, 2, 3, 122]:
+		player.pickup(LootTable.make(id))
+	player.box_put(0)
+	player.box_put(1)
+	main.run.local_woken()
+	await _frames(3)
+	var ids := []
+	for item in main.last_result.items:
+		ids.append(item.id)
+	_check(main.last_result.items.size() == 4 and 11 in ids and 4 in ids, "woken up: half the bag is lost, the box keeps everything (%s)" % str(ids))
+	await _end_run(main)
+
+
 func _said_full(said: Array[String]) -> bool:
 	for text in said:
 		if text.begins_with(Player.BAG_FULL_MESSAGE):
@@ -301,6 +475,8 @@ func _said_full(said: Array[String]) -> bool:
 	return false
 
 
+## Tab, then wait until the input has been handled: parsed events are flushed on idle
+## frames, and a slow run can fit several physics frames into one.
 func _press_tab() -> void:
 	var press := InputEventKey.new()
 	press.physical_keycode = KEY_TAB
@@ -309,6 +485,9 @@ func _press_tab() -> void:
 	var release := press.duplicate() as InputEventKey
 	release.pressed = false
 	Input.parse_input_event(release)
+	for i in 3:
+		await tree.process_frame
+	await _frames(1)
 
 
 func _rect(w: int, h: int) -> Array[Vector2i]:

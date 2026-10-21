@@ -699,6 +699,8 @@ func _on_inventory_changed(items: Array, weight: float, value: int) -> void:
 	var organs := items.filter(func(item: Dictionary) -> bool: return item.has("organ")).size()
 	if organs > 0:
 		_inventory.text += "　器官 %d" % organs
+	if _player != null and _player.box_value > 0:
+		_inventory.text += "　保險箱 $%d" % _player.box_value
 	var ratio := float(used) / cells if cells > 0 else 0.0
 	_weight_bar.value = ratio
 	# Heavier means slower: the bar goes orange, then red, as the weight piles on.

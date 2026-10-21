@@ -4,12 +4,18 @@ extends Control
 ## The game keeps running behind it. Drag an item to move it, R or right click turns it
 ## while dragging (R on a hovered item turns it in place), drop it outside the grid to
 ## throw it on the floor, G drops the item under the mouse. Hover shows what it is.
+## Beside the bag sits the 2x3 保險箱: drag things in and out of it the same way; what is
+## in it is paid out even if you die.
 
 const CELL := 54.0
 const PAD := 10.0
 const INFO_WIDTH := 300.0
 const SLOT := Color(0.09, 0.09, 0.1, 0.92)
 const SLOT_EDGE := Color(1.0, 1.0, 1.0, 0.1)
+## Room between the bag and the 保險箱, and above the 保險箱 for its name.
+const BOX_GAP := 44.0
+const BOX_TOP := 30.0
+const BOX_EDGE := Color(0.95, 0.72, 0.25)
 
 var player: Player
 ## Index into player.items of the item being dragged (-1: none), and the dragged item
@@ -20,8 +26,10 @@ var _drag_data: Dictionary = {}
 ## Which footprint cell (by index) is under the mouse while dragging.
 var _drag_cell := 0
 var hovered := -1
-## Where the mouse is, in grid cells (tests and tools can set it through point_at).
+## Where the mouse is, in bag cells (tests and tools can set it through point_at).
 var _mouse := Vector2.ZERO
+## The same, in 保險箱 cells.
+var _box_mouse := Vector2.ZERO
 
 var _panel: PanelContainer
 var _grid: Control
@@ -107,7 +115,7 @@ func _ready() -> void:
 	_hands.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_hands.custom_minimum_size.x = INFO_WIDTH
 	info.add_child(_hands)
-	_info_hint = UiKit.label("撤離時，包包裡的東西和雙手搬的大件都帶得走。", 14, UiKit.DIM)
+	_info_hint = UiKit.label("撤離時，包包裡的東西和雙手搬的大件都帶得走。保險箱裡的就算死了也照樣算錢。", 14, UiKit.DIM)
 	_info_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	_info_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_info_hint.custom_minimum_size.x = INFO_WIDTH
@@ -162,8 +170,9 @@ func refresh() -> void:
 				drag = i
 		if drag < 0:
 			_drag_data = {}
-	var size := GridBag.extent(player.bag_cells)
-	_grid.custom_minimum_size = Vector2(size) * CELL + Vector2(PAD, PAD) * 2.0
+	var size := Vector2(GridBag.extent(player.bag_cells)) * CELL
+	var box := Vector2(GridBag.BOX_SIZE) * CELL
+	_grid.custom_minimum_size = Vector2(size.x + BOX_GAP + box.x, maxf(size.y, BOX_TOP + box.y + 24.0)) + Vector2(PAD, PAD) * 2.0
 	var used := player.bag_cells.size() - GridBag.free_cells(player.bag_cells, player.items)
 	_size_tag.text = "%d 格" % player.bag_cells.size()
 	var organs := 0
@@ -215,29 +224,34 @@ func _input(event: InputEvent) -> void:
 ## Moves the pointer to a spot in the grid control's local pixels.
 func point_at(local: Vector2) -> void:
 	_mouse = (local - Vector2(PAD, PAD)) / CELL
-	var cell := Vector2i(floori(_mouse.x), floori(_mouse.y))
-	var taken := GridBag.occupancy(player.items)
+	_box_mouse = (local - _box_corner()) / CELL
+	var taken := GridBag.occupancy(player.items, -1, _key())
 	var before := hovered
-	hovered = taken.get(cell, -1) if drag < 0 else drag
+	hovered = taken.get(_mouse_cell(), -1) if drag < 0 else drag
 	if hovered != before:
 		_show_info()
 	_grid.queue_redraw()
 	_drag_layer.queue_redraw()
 
 
-## Same, in grid cells (tests, screenshots).
+## Same, in bag cells (tests, screenshots).
 func point_at_cell(cell: Vector2) -> void:
 	point_at(Vector2(PAD, PAD) + cell * CELL)
 
 
+## Same, in 保險箱 cells.
+func point_at_box_cell(cell: Vector2) -> void:
+	point_at(_box_corner() + cell * CELL)
+
+
 func begin_drag() -> bool:
 	var cell := _mouse_cell()
-	var index: int = GridBag.occupancy(player.items).get(cell, -1)
+	var index: int = GridBag.occupancy(player.items, -1, _key()).get(cell, -1)
 	if index < 0:
 		return false
 	drag = index
 	_drag_data = player.items[index]
-	var at: Vector3i = _drag_data.bag
+	var at: Vector3i = _drag_data[_key()]
 	drag_turns = at.z
 	var cells := GridBag.rotated(GridBag.footprint(_drag_data), drag_turns)
 	_drag_cell = maxi(cells.find(cell - Vector2i(at.x, at.y)), 0)
@@ -254,13 +268,14 @@ func turn() -> void:
 		drag_turns = posmod(drag_turns + 1, 4)
 	elif hovered >= 0:
 		var data: Dictionary = player.items[hovered]
-		var at: Vector3i = data.bag
+		var boxed := data.has("box")
+		var at: Vector3i = data.box if boxed else data.bag
 		var size := GridBag.footprint_size(data, at.z)
 		var turned := GridBag.footprint_size(data, at.z + 1)
 		# Turn about the middle, then nudge around to find room.
 		var base := Vector2i(at.x, at.y) + (size - turned) / 2
 		for nudge: Vector2i in [Vector2i.ZERO, Vector2i(-1, 0), Vector2i(0, -1), Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, -1), Vector2i(-2, 0), Vector2i(0, -2)]:
-			if player.bag_move(hovered, base + nudge, at.z + 1):
+			if player.bag_move(hovered, base + nudge, at.z + 1, boxed):
 				break
 	_grid.queue_redraw()
 	_drag_layer.queue_redraw()
@@ -274,19 +289,28 @@ func drag_origin() -> Vector2i:
 
 func drag_fits() -> bool:
 	var cells := GridBag.rotated(GridBag.footprint(_drag_data), drag_turns)
-	return GridBag.fits(player.bag_cells, GridBag.occupancy(player.items, drag), cells, drag_origin())
+	var shape := player.box_cells if _over_box() else player.bag_cells
+	return GridBag.fits(shape, GridBag.occupancy(player.items, drag, _key()), cells, drag_origin())
 
 
-## Let go: into the grid if it fits there, on the floor if outside the grid, else back.
-## Returns "moved", "dropped" or "back".
+## Let go: into the bag or the 保險箱 if it fits there, on the floor if outside both,
+## else back. Returns "moved", "dropped" or "back".
 func end_drag() -> String:
 	if drag < 0:
 		return "back"
 	var index := drag
 	var result := "back"
-	if not _over_grid():
-		player.drop_item(index)
-		result = "dropped"
+	if _over_box():
+		if player.bag_move(index, drag_origin(), drag_turns, true):
+			result = "moved"
+		elif not GridBag.fits_box(_drag_data):
+			player.message.emit("保險箱只有 2×3，放不下「%s」" % _drag_data.get("name", "?"))
+		else:
+			player.message.emit("那裡放不下")
+	elif not _over_grid():
+		if not _between_grids():
+			player.drop_item(index)
+			result = "dropped"
 	elif player.bag_move(index, drag_origin(), drag_turns):
 		result = "moved"
 	else:
@@ -302,7 +326,10 @@ func end_drag() -> String:
 func drop_hovered() -> void:
 	if drag >= 0:
 		return
-	player.drop_item(hovered if hovered >= 0 else player.items.size() - 1)
+	if hovered >= 0:
+		player.drop_item(hovered)
+	else:
+		player.drop_last()
 	hovered = -1
 	refresh()
 
@@ -314,8 +341,33 @@ func _cancel_drag() -> void:
 	_drag_layer.queue_redraw()
 
 
+## The cell under the mouse, in the 保險箱 when over it, else in the bag.
 func _mouse_cell() -> Vector2i:
-	return Vector2i(floori(_mouse.x), floori(_mouse.y))
+	var at := _box_mouse if _over_box() else _mouse
+	return Vector2i(floori(at.x), floori(at.y))
+
+
+## Which grid the mouse is over: "box" for the 保險箱, else "bag".
+func _key() -> String:
+	return "box" if _over_box() else "bag"
+
+
+## Top-left of the 保險箱's first cell, in the grid control's pixels.
+func _box_corner() -> Vector2:
+	var bag_width := GridBag.extent(player.bag_cells).x if player != null else GridBag.MAX_SIZE.x
+	return Vector2(PAD + bag_width * CELL + BOX_GAP, PAD + BOX_TOP)
+
+
+## Offset that draws a bag-cell rect (_cell_rect) in the 保險箱 instead.
+func _box_offset() -> Vector2:
+	return _box_corner() - Vector2(PAD, PAD)
+
+
+## Inside the 保險箱 (with a little margin).
+func _over_box() -> bool:
+	var margin := PAD / CELL
+	var size := Vector2(GridBag.BOX_SIZE)
+	return _box_mouse.x >= -margin and _box_mouse.y >= -margin and _box_mouse.x < size.x + margin and _box_mouse.y < size.y + margin
 
 
 ## Inside the grid's box (with its padding), even over a gap in the bag's shape.
@@ -323,6 +375,13 @@ func _over_grid() -> bool:
 	var size := Vector2(GridBag.extent(player.bag_cells))
 	var margin := PAD / CELL
 	return _mouse.x >= -margin and _mouse.y >= -margin and _mouse.x < size.x + margin and _mouse.y < size.y + margin
+
+
+## In the space between the bag and the 保險箱: letting go there just puts it back.
+func _between_grids() -> bool:
+	var left := Vector2(PAD, PAD) + Vector2(GridBag.extent(player.bag_cells).x, 0.0) * CELL
+	var at := Vector2(PAD, PAD) + _mouse * CELL
+	return at.x >= left.x and at.x < _box_corner().x and at.y >= 0.0 and at.y < _grid.custom_minimum_size.y
 
 
 # --- Info -------------------------------------------------------------------------------
@@ -333,7 +392,7 @@ func _show_info() -> void:
 	if hovered < 0 or hovered >= player.items.size():
 		_info_name.text = "（把滑鼠移到物品上）"
 		_info_name.add_theme_color_override("font_color", UiKit.DIM)
-		_info_body.text = "撿東西會自動塞進第一個放得下的位置。\n塞不下就留在地上：整理一下，或丟掉便宜的。"
+		_info_body.text = "撿東西會自動塞進第一個放得下的位置。\n塞不下就留在地上：整理一下，或丟掉便宜的。\n值錢的小東西拖進保險箱，死了也保得住。"
 		_info_body.add_theme_color_override("font_color", UiKit.DIM)
 		return
 	var data: Dictionary = player.items[hovered]
@@ -357,6 +416,10 @@ func _show_info() -> void:
 		lines.append("・".join(tags))
 	if LootTable.USE_NAMES.has(data.get("use", "")):
 		lines.append("X：%s" % LootTable.USE_NAMES[data.use])
+	if data.has("box"):
+		lines.append("在保險箱裡：死了也算錢")
+	elif not GridBag.fits_box(data):
+		lines.append("太大，放不進保險箱")
 	_info_body.text = "\n".join(lines)
 	_info_body.add_theme_color_override("font_color", UiKit.TEXT)
 
@@ -384,19 +447,48 @@ func _draw_grid() -> void:
 		if i == drag:
 			continue
 		_draw_item(_grid, player.items[i], GridBag.placed_cells(player.items[i]), Vector2.ZERO, i == hovered)
-	# Where the dragged item would land: green if it fits, red over loot or off the bag.
-	if drag >= 0 and _over_grid():
+	_draw_box()
+	# Where the dragged item would land: green if it fits, red over loot or off the grid.
+	if drag >= 0 and (_over_grid() or _over_box()):
 		var color := UiKit.GOOD if drag_fits() else UiKit.DANGER
+		var offset := _box_offset() if _over_box() else Vector2.ZERO
 		var ghost: Array[Vector2i] = []
 		var origin := drag_origin()
 		for cell in GridBag.rotated(GridBag.footprint(_drag_data), drag_turns):
-			ghost.append(origin + cell)
+			# In the 保險箱, cells hanging off it are cut (they'd cover its name).
+			if offset == Vector2.ZERO or Rect2i(Vector2i.ZERO, GridBag.BOX_SIZE).has_point(origin + cell):
+				ghost.append(origin + cell)
 		var ghost_lookup := {}
 		for cell in ghost:
 			ghost_lookup[cell] = true
 		for cell in ghost:
-			_grid.draw_rect(_cell_rect(cell).grow(-3.0), Color(color, 0.3))
-		_outline(_grid, ghost, Vector2.ZERO, color, 3.0, ghost_lookup, 2.0)
+			var rect := _cell_rect(cell).grow(-3.0)
+			rect.position += offset
+			_grid.draw_rect(rect, Color(color, 0.3))
+		_outline(_grid, ghost, offset, color, 3.0, ghost_lookup, 2.0)
+
+
+## The 保險箱: its name above, slots ringed in brass, what is inside, its worth below.
+func _draw_box() -> void:
+	var offset := _box_offset()
+	var lookup := {}
+	for cell in player.box_cells:
+		lookup[cell] = true
+		var rect := _cell_rect(cell)
+		rect.position += offset
+		_grid.draw_rect(rect.grow(-1.0), SLOT)
+		_grid.draw_rect(rect.grow(-1.0), SLOT_EDGE, false, 1.0)
+	_outline(_grid, player.box_cells, offset, Color(BOX_EDGE, 0.85), 2.0, lookup)
+	var font := UiKit.bold_font()
+	var corner := _box_corner()
+	var width := GridBag.BOX_SIZE.x * CELL
+	_grid.draw_string(font, corner + Vector2(0.0, -10.0), "保險箱", HORIZONTAL_ALIGNMENT_LEFT, width, 18, BOX_EDGE)
+	for i in player.items.size():
+		if i != drag and player.items[i].has("box"):
+			_draw_item(_grid, player.items[i], GridBag.placed_cells(player.items[i], "box"), offset, i == hovered)
+	var below := corner + Vector2(0.0, GridBag.BOX_SIZE.y * CELL + 18.0)
+	var worth := "死了也算錢" if player.box_value <= 0 else "$%d　死了也算" % player.box_value
+	_grid.draw_string(font, below, worth, HORIZONTAL_ALIGNMENT_LEFT, width + BOX_GAP, 13, UiKit.DIM if player.box_value <= 0 else BOX_EDGE)
 
 
 func _draw_drag() -> void:
@@ -409,8 +501,17 @@ func _draw_drag() -> void:
 	var offset := origin_px - (Vector2(grab) + Vector2(0.5, 0.5)) * CELL - Vector2(PAD, PAD)
 	_draw_item(_drag_layer, _drag_data, cells, offset, true, 0.72)
 	# What letting go would do.
-	var note := "放開：丟在地上" if not _over_grid() else ("放開：放進這裡" if drag_fits() else "這裡放不下")
-	var color := UiKit.WARN if not _over_grid() else (UiKit.GOOD if drag_fits() else UiKit.DANGER)
+	var note := "放開：丟在地上"
+	var color := UiKit.WARN
+	if _over_box():
+		note = "放開：放進保險箱" if drag_fits() else ("保險箱放不下這麼大的" if not GridBag.fits_box(_drag_data) else "這裡放不下")
+		color = UiKit.GOOD if drag_fits() else UiKit.DANGER
+	elif _over_grid():
+		note = "放開：放進這裡" if drag_fits() else "這裡放不下"
+		color = UiKit.GOOD if drag_fits() else UiKit.DANGER
+	elif _between_grids():
+		note = "放開：放回原位"
+		color = UiKit.DIM
 	var size := Vector2(GridBag.extent(cells)) * CELL
 	var at := offset + Vector2(PAD, PAD) + Vector2(0.0, size.y + 20.0)
 	var font := UiKit.bold_font()
