@@ -82,7 +82,7 @@ const FRAMES := {
 		"damage": 5.0, "pellets": 1, "rate": 10.0, "auto": true, "mag": 80, "reserve": 80, "reload": 3.5,
 		"spread": 0.0, "range": 7.0, "noise": 15.0, "recoil": 0.0, "zoom": 1.0,
 		"slots": ["muzzle", "magazine", "gadget"], "effects": {"burn": 3.0},
-		"desc": "噴出一片火，燒到的東西會繼續燒。對鼠群和撲燈蛾特別有效。",
+		"desc": "噴出一片火，燒到的東西會繼續燒。對鼠群特別有效。",
 	},
 	"tesla": {
 		"name": "特斯拉線圈槍", "price": 650, "weight": 4.0, "tags": ["energy"], "kind": "arc",

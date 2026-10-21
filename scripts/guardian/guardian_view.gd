@@ -17,7 +17,7 @@ var energy := FieldControl.START_ENERGY
 var cooldowns := {"gate": 0.0, "power": 0.0, "monster": 0.0}
 var extracted := 0
 var selected := ""  # "monster" while choosing where to release
-var release_kind := "moth"
+var release_kind := "mimic"
 
 var _overlay: Control
 var _energy_bar: ProgressBar

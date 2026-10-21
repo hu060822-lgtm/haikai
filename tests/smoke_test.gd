@@ -23,7 +23,6 @@ func _run() -> void:
 	await _test_extraction()
 	await _test_death()
 	await _test_mannequin()
-	await _test_moth()
 	await _test_mimic()
 	await _test_field_control()
 	await _test_director()
@@ -203,33 +202,6 @@ func _test_mannequin() -> void:
 		waited += 1
 	_check(player.health < Player.MAX_HEALTH and not player.is_dead, "it rushes you the moment you look away (hp=%.0f)" % player.health)
 	_check(dummy.global_position.distance_to(player.global_position) > 8.0, "then it is somewhere else")
-	await _end_run(main)
-
-
-func _test_moth() -> void:
-	print("moth")
-	Run.forced_monsters = ["moth"]
-	var main = await _new_run()
-	var player: Player = main.player
-	var moths: Array = main.run.monsters_root.get_children().filter(func(node) -> bool: return node is Moth)
-	_check(moths.size() >= 2, "moths spawn (%d)" % moths.size())
-	var moth: Moth = moths[0]
-	for other in moths.slice(1):
-		other.global_position = Vector3(0, 30, -100)
-		other.home = other.global_position
-	player.global_position = Vector3(4.0, 0.1, 15.0)
-	moth.global_position = Vector3(4.0, 2.0, 9.0)
-	player.set_lantern(false)
-	await _frames(120)
-	_check(player.lantern_on == false and moth.global_position.distance_to(player.head_position()) > 3.0,
-		"moth ignores a player with the lantern off")
-	player.set_lantern(true)
-	var waited := 0
-	while player.lantern_on and waited < 400:
-		await physics_frame
-		waited += 1
-	_check(not player.lantern_on, "moth flies at the lantern and puts it out")
-	_check(moth.resting, "then it rests for a while")
 	await _end_run(main)
 
 
@@ -841,12 +813,12 @@ func _test_field_control() -> void:
 	_check(level.extraction_zone.powered, "power comes back after the blackout")
 
 	field.energy = 100.0
-	var moths_before: int = main.run.monsters_root.get_children().filter(func(n) -> bool: return n is Moth).size()
-	_check(not field.use_monster("moth", player.global_position + Vector3(1, 0, 0)), "can't release a monster on top of someone")
-	_check(field.use_monster("moth", Vector3(0, 0.1, -8.0)), "can release a monster away from players")
+	var mimics_before: int = main.run.monsters_root.get_children().filter(func(n) -> bool: return n is Mimic).size()
+	_check(not field.use_monster("mimic", player.global_position + Vector3(1, 0, 0)), "can't release a monster on top of someone")
+	_check(field.use_monster("mimic", Vector3(0, 0.1, -8.0)), "can release a monster away from players")
 	await _frames(3)
-	var moths_after: int = main.run.monsters_root.get_children().filter(func(n) -> bool: return n is Moth).size()
-	_check(moths_after == moths_before + 1, "the released moth appears")
+	var mimics_after: int = main.run.monsters_root.get_children().filter(func(n) -> bool: return n is Mimic).size()
+	_check(mimics_after == mimics_before + 1, "the released mimic appears")
 	await _end_run(main)
 
 

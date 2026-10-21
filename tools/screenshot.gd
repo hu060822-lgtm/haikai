@@ -42,7 +42,7 @@ func _run() -> void:
 	main.session.leave()
 
 	main.show_menus = false
-	Run.forced_monsters = ["colossus", "mannequin", "moth", "mimic"]
+	Run.forced_monsters = ["colossus", "mannequin", "mimic"]
 	Run.forced_map = "factory"
 	main.start_run({"build": Arsenal.STARTER, "boosts": ["adrenaline"]})
 	for i in 30:
@@ -94,10 +94,6 @@ func _run() -> void:
 			node.rotation.y = 0.2
 			node.pose = 1
 			shot = "mannequin"
-		elif node is Moth:
-			node.global_position = Vector3(3.8, 1.6, 17.6)
-			node.rotation.y = 0.6
-			shot = "moth"
 		elif node is Mimic:
 			node.global_position = Vector3(4.0, 0.05, 17.9)
 			node.rotation.y = 0.9

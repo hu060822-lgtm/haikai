@@ -178,8 +178,6 @@ func _host_spawn_monsters() -> void:
 					data.pos = level.monster_spawn
 				"mannequin":
 					data.pos = _far_patrol_point()
-				"moth":
-					data.pos = level.random_patrol_point() + Vector3(0, 3.0, 0)
 				"watcher":
 					data.pos = _far_patrol_point()
 				"centipede", "mother":
@@ -227,12 +225,9 @@ func _power_set(on: bool) -> void:
 func host_release_monster(kind: String, pos: Vector3) -> void:
 	_monster_serial += 1
 	var data := {"type": kind, "name": "%s%d" % [kind.capitalize(), _monster_serial], "seed": rng.randi(), "pos": pos}
-	match kind:
-		"moth":
-			data.pos = pos + Vector3.UP * 1.5
-		"mimic":
-			data.rot = rng.randf_range(0.0, TAU)
-			data.disguise = LootTable.roll(rng, 0.8, level.loot_pool)
+	if kind == "mimic":
+		data.rot = rng.randf_range(0.0, TAU)
+		data.disguise = LootTable.roll(rng, 0.8, level.loot_pool)
 	_monster_spawner.spawn(data)
 	_monster_released.rpc(pos)
 
@@ -359,11 +354,6 @@ func _spawn_monster(data: Dictionary) -> Node:
 			mannequin.patrol_points.assign(level.patrol_points)
 			mannequin.rng.seed = data.seed
 			monster = mannequin
-		"moth":
-			var moth := Moth.new()
-			moth.home = data.pos
-			moth.rng.seed = data.seed
-			monster = moth
 		"mimic":
 			var mimic := Mimic.new()
 			mimic.disguise = data.disguise
@@ -960,7 +950,7 @@ func weapon_hits(rule: Dictionary, origin: Vector3, direction: Vector3) -> Array
 		var box: Array = SIZE_BOX[_size_of(monster)]
 		var radius: float = box[0]
 		var height: float = box[1]
-		var base: Vector3 = monster.global_position - (Vector3.UP * 0.5 if monster is Moth else Vector3.ZERO)
+		var base: Vector3 = monster.global_position
 		# Closest approach of the aim line to the monster's vertical axis.
 		var flat_dir := Vector2(direction.x, direction.z)
 		var flat_to := Vector2(base.x - origin.x, base.z - origin.z)
@@ -1060,8 +1050,6 @@ func live_monsters() -> Array[Node3D]:
 
 func _chest(monster: Node3D) -> Vector3:
 	var box: Array = SIZE_BOX[_size_of(monster)]
-	if monster is Moth:
-		return monster.global_position
 	return monster.global_position + Vector3.UP * minf(float(box[1]) * 0.5, 1.4)
 
 

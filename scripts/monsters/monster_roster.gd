@@ -10,8 +10,6 @@ const MONSTERS := {
 		"weak": {"explode": 1.4, "burn": 0.4, "stun": 0.5}},
 	"mannequin": {"name": "假人", "size": "medium", "count": [1, 1], "health": 200,
 		"weak": {"explode": 2.0, "knock": 1.5, "burn": 0.5}},
-	"moth": {"name": "撲燈蛾", "size": "small", "count": [2, 3], "health": 12,
-		"weak": {"burn": 4.0, "explode": 2.0}},
 	"mimic": {"name": "擬態蟲", "size": "small", "count": [2, 3], "health": 25,
 		"weak": {"bullet": 1.5, "bayonet": 2.0}},
 	"watcher": {"name": "長頸觀察者", "size": "large", "count": [1, 1], "health": 700,
