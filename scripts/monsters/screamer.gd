@@ -129,7 +129,7 @@ func _think(delta: float) -> void:
 			return
 		state = State.WATCH
 	elif _target != null and (not is_instance_valid(_target) or not _target.is_active() \
-			or global_position.distance_to(_target.global_position) > SIGHT_LIT * 1.5):
+			or global_position.distance_to(_target.global_position) > MonsterKit.sight(SIGHT_LIT) * 1.5):
 		_target = null
 	if state == State.WATCH and _target != null:
 		# Keep a safe distance and keep looking.
@@ -171,7 +171,7 @@ func _spot() -> Player:
 	for player in MonsterKit.active_players(get_tree()):
 		var chest := player.global_position + Vector3.UP
 		var distance := eye.distance_to(chest)
-		var sight := SIGHT_LIT if player.is_lit() else SIGHT_DARK
+		var sight := MonsterKit.sight_of(player, SIGHT_LIT, SIGHT_DARK)
 		if distance < sight and distance < best_distance \
 				and MonsterKit.clear_line(get_world_3d(), eye, chest, [get_rid()]):
 			best = player

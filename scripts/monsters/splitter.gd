@@ -131,10 +131,7 @@ func host_kill() -> void:
 static func spawn_crawler(at: Vector3) -> void:
 	if Run.instance == null:
 		return
-	if Run.instance.has_method("host_spawn_monster"):
-		Run.instance.host_spawn_monster(CRAWLER_KIND, at)
-	else:
-		Run.instance.host_release_monster(CRAWLER_KIND, at)
+	Run.instance.host_spawn_monster(CRAWLER_KIND, at)
 
 
 func _think(delta: float) -> void:
@@ -181,7 +178,7 @@ func _spot() -> Player:
 	for player in MonsterKit.active_players(get_tree()):
 		var chest := player.global_position + Vector3.UP
 		var distance := eye.distance_to(chest)
-		var sight := SIGHT_LIT if player.is_lit() else SIGHT_DARK
+		var sight := MonsterKit.sight_of(player, SIGHT_LIT, SIGHT_DARK)
 		if distance < sight and distance < best_distance \
 				and MonsterKit.clear_line(get_world_3d(), eye, chest, [get_rid()]):
 			best = player

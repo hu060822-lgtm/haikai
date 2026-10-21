@@ -93,6 +93,8 @@ static func take(id: String) -> bool:
 	if owned(id) > 0:
 		stash[id] -= 1
 		return true
+	if Arsenal.is_organ(id):
+		return false  # organs only come out of monsters
 	var price: int = price_of(id)
 	if money < price:
 		return false
@@ -108,6 +110,8 @@ static func price_of(id: String) -> int:
 
 ## Buys one into the stash without equipping it (the gunsmith's parts shelf).
 static func buy(id: String) -> bool:
+	if Arsenal.is_organ(id):
+		return false
 	var price := price_of(id)
 	if money < price:
 		return false
@@ -127,15 +131,27 @@ static func build_cost(build: Dictionary) -> int:
 	return cost
 
 
+## Organs a build needs that you don't have (they can't be bought).
+static func missing_organs(build: Dictionary) -> Array[String]:
+	var counts := {}
+	var missing: Array[String] = []
+	for id in Arsenal.ids(build):
+		counts[id] = counts.get(id, 0) + 1
+		if Arsenal.is_organ(id) and counts[id] > owned(id):
+			missing.append(id)
+	return missing
+
+
 ## Swaps the equipped weapon for this build: the old one's pieces go back to the stash,
 ## the new one's come out of it (missing pieces are bought). False if it can't be afforded.
 static func equip_build(build: Dictionary) -> bool:
 	build = Arsenal.clean(build)
 	for id in Arsenal.ids(equipped.build):
 		give_back(id)
-	if build_cost(build) > money:
+	if build_cost(build) > money or not missing_organs(build).is_empty():
 		for id in Arsenal.ids(equipped.build):
-			stash[id] -= 1
+			if stash.has(id):  # the free revolver was never handed back
+				stash[id] -= 1
 		return false
 	for id in Arsenal.ids(build):
 		take(id)
@@ -170,16 +186,6 @@ static func record_extraction(earned: int, surviving_gear: Array) -> void:
 	best_haul = maxi(best_haul, earned)
 	for id in surviving_gear:
 		give_back(id)
-	save_game()
-
-
-const GUARDIAN_WIN_REWARD := 250
-const GUARDIAN_LOSS_REWARD := 50
-
-
-## The guardian earns money too: a lot for holding the line, a little for showing up.
-static func record_guardian(won: bool) -> void:
-	money += GUARDIAN_WIN_REWARD if won else GUARDIAN_LOSS_REWARD
 	save_game()
 
 

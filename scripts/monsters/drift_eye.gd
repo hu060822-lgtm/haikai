@@ -3,7 +3,7 @@ extends Node3D
 ## 窺視眼: bloodshot eyeballs the size of a head, drifting near the ceiling on little
 ## leathery wings with their nerves trailing beneath. They come in twos to fours.
 ## Dominates by ABILITY: they fly, they never lose sight of you, and while one stares at
-## you it shrieks your position to everything in the building (and the guardian).
+## you it shrieks your position to everything in the building.
 ## Now and then one dives at your face.
 ## Weaknesses players can learn:
 ##   - Fragile: one or two good hits pop them, and a stun or shock drops them to the
@@ -141,7 +141,7 @@ func _think(delta: float) -> void:
 
 func _sees(player: Player) -> bool:
 	var eye := player.head_position()
-	return global_position.distance_to(eye) < SIGHT and MonsterKit.clear_line(get_world_3d(), global_position, eye)
+	return global_position.distance_to(eye) < MonsterKit.sight(SIGHT) and MonsterKit.clear_line(get_world_3d(), global_position, eye)
 
 
 func _watch(delta: float) -> void:
@@ -173,7 +173,7 @@ func _watch(delta: float) -> void:
 	_mark -= delta
 	if _mark <= 0.0:
 		_mark = MARK_INTERVAL
-		# The shriek: every monster nearby (and the guardian) hears where you are.
+		# The shriek: every monster nearby hears where you are.
 		GameNoise.emit_local(get_tree(), _target.global_position, MARK_RADIUS, GameNoise.Kind.VOICE)
 		_play_cry.rpc(1.0)
 	_dive_timer -= delta

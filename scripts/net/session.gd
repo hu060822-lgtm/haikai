@@ -25,12 +25,10 @@ const SQUADS := 4
 const SQUAD_SIZE := 4
 const SQUAD_NAMES := ["紅隊", "藍隊", "黃隊", "綠隊"]
 const SQUAD_COLORS := [Color(0.85, 0.3, 0.25), Color(0.3, 0.55, 0.95), Color(0.95, 0.8, 0.25), Color(0.35, 0.8, 0.4)]
-## The guardian wins if the scavengers get out with less than this much per scavenger.
-const THRESHOLD_PER_SCAVENGER := 250
 
 static var instance: Session
 
-## peer id -> {"name": String, "role": "scavenger" or "guardian", "squad": int}
+## peer id -> {"name": String, "squad": int}
 var roster := {}
 ## Host: money the scavengers have extracted so far this run (and per squad).
 var extracted_total := 0
@@ -114,19 +112,9 @@ func leave() -> void:
 	_finished_peers.clear()
 
 
-func role_of(id: int) -> String:
-	return roster.get(id, {}).get("role", "scavenger")
-
-
-func guardian_id() -> int:
-	for id in roster:
-		if role_of(id) == "guardian":
-			return id
-	return 0
-
-
+## Everyone in the room goes in: there are only scavengers (pure PvPvE).
 func scavenger_ids() -> Array:
-	return roster.keys().filter(func(id) -> bool: return role_of(id) == "scavenger")
+	return roster.keys()
 
 
 func squad_of(id: int) -> int:
@@ -169,22 +157,6 @@ func _set_squad(squad: int) -> void:
 	if squad_size(squad) >= SQUAD_SIZE:
 		return
 	roster[id].squad = squad
-	_push_roster()
-
-
-## Ask to be (or stop being) the guardian. Only one guardian, and never with nobody to hunt.
-func request_role(role: String) -> void:
-	_to_host(&"_set_role", [role])
-
-
-@rpc("any_peer", "call_local", "reliable")
-func _set_role(role: String) -> void:
-	var id := _sender()
-	if not is_host() or in_run or not roster.has(id) or not role in ["scavenger", "guardian"]:
-		return
-	if role == "guardian" and guardian_id() != 0 and guardian_id() != id:
-		return
-	roster[id].role = role
 	_push_roster()
 
 
@@ -247,14 +219,10 @@ func _check_all_finished() -> void:
 	_end_run.rpc(summary())
 
 
-## The run's outcome so far: what got out, against the guardian's threshold.
+## The run's outcome so far: what got out, in all and per squad.
 func summary() -> Dictionary:
-	var threshold: int = THRESHOLD_PER_SCAVENGER * maxi(_run_scavengers, 1)
-	var guardian := guardian_id()
 	return {
-		"extracted": extracted_total, "threshold": threshold,
-		"guardian_won": extracted_total < threshold,
-		"guardian": roster[guardian].name if guardian != 0 else "",
+		"extracted": extracted_total, "scavengers": _run_scavengers,
 		"squads": active_squads(), "squad_totals": squad_totals.duplicate(),
 	}
 
@@ -318,10 +286,8 @@ func _introduce(player_name: String) -> void:
 	var id := _sender()
 	if roster.size() > MAX_PLAYERS:
 		return
-	var role: String = roster.get(id, {}).get("role", "scavenger")
 	var squad: int = roster.get(id, {}).get("squad", _open_squad())
 	roster[id] = _entry(player_name.substr(0, 16))
-	roster[id].role = role
 	roster[id].squad = squad
 	_push_roster()
 
@@ -337,7 +303,7 @@ func _set_roster(new_roster: Dictionary) -> void:
 
 
 func _entry(player_name: String) -> Dictionary:
-	return {"name": player_name, "role": "scavenger", "squad": 0}
+	return {"name": player_name, "squad": 0}
 
 
 ## Newcomers join the host's squad until it is full.

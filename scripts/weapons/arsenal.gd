@@ -34,6 +34,10 @@ const SLOT_NAMES := {
 ##   effects   what a hit does besides damage: stun, slow, burn (seconds), pierce
 ##             (true: goes through everything), knock (metres), explode (radius), chain (extra
 ##             targets), lure (the hit spot is noisy), reveal (shows hidden monsters), bubble
+##   organ effects (see Organs): scream (the hit spot screams monsters over), hush (barely
+##             wakes the map), acid (puddle seconds), lullaby (hit spot plays music that
+##             calms), web, motion_sight / squeal (sights), guard (aiming halves damage
+##             taken), fang (a knife three times as strong)
 const FRAMES := {
 	"revolver": {
 		"name": "舊警用左輪", "price": 0, "weight": 1.0, "tags": ["gun"], "kind": "hitscan",
@@ -203,6 +207,85 @@ const PARTS := {
 		"effects": {"bounty": true}, "desc": "殺死怪物時，牠會掉下一件東西。"},
 	"echo_bell": {"name": "回聲鈴鐺", "slot": "gadget", "price": 140, "weight": 0.1, "fits": "all",
 		"effects": {"lure": true}, "x": {"noise": 0.6}, "desc": "槍聲變小，但子彈打到的地方會叮噹響，把怪物引過去。"},
+
+	# --- Organs (器官): never sold. They come out of monsters (see Organs) and carry that
+	# monster's power, always with a catch. "monster" is the roster kind that drops it.
+	# Muzzle
+	"screamer_mask": {"name": "尖叫面具", "slot": "muzzle", "price": 0, "organ": true, "monster": "screamer",
+		"weight": 0.5, "fits": ["gun", "fuel"], "x": {"noise": 0.35, "damage": 0.85}, "effects": {"scream": true},
+		"desc": "槍口本身很安靜，但每一發打到的地方都會尖叫，把那一帶的怪物引過去（不是引向你）。傷害少一點。"},
+	"stalker_shadow": {"name": "影子跟蹤者的影", "slot": "muzzle", "price": 0, "organ": true, "monster": "stalker",
+		"weight": 0.1, "fits": ["gun"], "x": {"noise": 0.08, "damage": 0.7, "range": 0.75}, "effects": {"hush": true},
+		"desc": "影子吞掉槍聲：幾乎沒有聲音，也幾乎吵不醒廢墟。但它也吞掉三成傷害，子彈飛不遠。"},
+	"greeter_smile": {"name": "迎賓員的笑臉", "slot": "muzzle", "price": 0, "organ": true, "monster": "greeter",
+		"weight": 0.6, "fits": ["gun"], "x": {"damage": 1.35, "noise": 1.5},
+		"desc": "咬在槍口上的整張笑臉：傷害多三成五。每一槍它都會大聲說「歡迎光臨」。"},
+	"fog_lung": {"name": "霧行者的肺", "slot": "muzzle", "price": 0, "organ": true, "monster": "fog_walker",
+		"weight": 0.7, "fits": ["gun", "fuel"], "x": {"noise": 0.6, "range": 0.7}, "effects": {"reveal": true},
+		"desc": "槍口噴出冷霧：子彈會逼出隱形的東西，槍聲也被霧吃掉一些。但霧讓子彈飛不遠。"},
+	# Barrel
+	"splitter_core": {"name": "分裂者的核", "slot": "barrel", "price": 0, "organ": true, "monster": "splitter",
+		"weight": 0.9, "fits": ["gun", "energy"], "+": {"pellets": 2, "spread": 1.5}, "x": {"damage": 0.5, "spread": 1.4},
+		"desc": "子彈一出膛就裂成三顆。每顆只剩一半傷害，而且散得很開。"},
+	"burrower_drill": {"name": "穿山者的鑽爪", "slot": "barrel", "price": 0, "organ": true, "monster": "burrower",
+		"weight": 1.8, "fits": ["gun", "energy"], "x": {"range": 0.6, "rate": 0.8}, "effects": {"pierce": true, "armor": true},
+		"desc": "子彈會鑽：貫穿一整排，對大型怪多 50%。但鑽不遠，射得也慢。"},
+	# Sight
+	"watcher_eye": {"name": "長頸觀察者的眼", "slot": "sight", "price": 0, "organ": true, "monster": "watcher",
+		"weight": 1.2, "fits": ["gun", "bolt", "energy", "launcher"], "=": {"zoom": 2.2}, "x": {"spread": 1.2},
+		"effects": {"motion_sight": true},
+		"desc": "瞄準時，牆後所有「在動」的東西都看得到（不動的就看不到）。眼球自己會亂轉，散佈大一點。"},
+	"eye_lens": {"name": "窺視眼的眼球", "slot": "sight", "price": 0, "organ": true, "monster": "eyes",
+		"weight": 0.3, "fits": ["gun", "bolt", "energy", "launcher"], "=": {"zoom": 1.8}, "x": {"spread": 0.7},
+		"effects": {"thermal": true, "squeal": true},
+		"desc": "瞄準時看得到黑暗裡和隱形的怪物，而且很準。但被你盯著時它會一直尖叫，附近的東西都聽得到。"},
+	# Magazine
+	"centipede_segment": {"name": "蜈蚣列車的節", "slot": "magazine", "price": 0, "organ": true, "monster": "centipede",
+		"weight": 2.5, "fits": ["gun", "launcher", "energy"], "x": {"mag": 3.0, "rate": 1.2, "reload": 2.2},
+		"desc": "像列車一樣一節接一節：子彈多三倍、射得更快。但換彈要把整節拖出來，非常慢。"},
+	"mimic_shell": {"name": "擬態蟲的殼", "slot": "magazine", "price": 0, "organ": true, "monster": "mimic",
+		"weight": 0.4, "fits": ["gun", "launcher"], "x": {"mag": 0.6}, "effects": {"ghost": 3},
+		"desc": "它會模仿子彈：每第 3 發不耗彈。但殼裡只塞得下六成子彈。"},
+	"collector_sack": {"name": "回收員的袋子", "slot": "magazine", "price": 0, "organ": true, "monster": "collector",
+		"weight": 1.0, "fits": ["gun", "launcher", "energy", "fuel"], "x": {"reserve": 2.0, "reload": 1.3, "noise": 1.15},
+		"desc": "它會把彈殼撿回來：備彈多一倍。換彈要在袋子裡翻，比較慢，還會吱吱叫。"},
+	# Stock
+	"knight_door": {"name": "盾甲騎士的門板", "slot": "stock", "price": 0, "organ": true, "monster": "shield_knight",
+		"weight": 6.0, "fits": ["gun", "bolt", "energy", "launcher"], "x": {"recoil": 0.5}, "effects": {"guard": 0.5},
+		"desc": "瞄準時把門板頂在前面：受到的傷害減半，後座也小。但一整扇鐵門非常重。"},
+	"mannequin_arm": {"name": "假人的手臂", "slot": "stock", "price": 0, "organ": true, "monster": "mannequin",
+		"weight": 1.4, "fits": ["gun", "bolt", "energy", "launcher"], "x": {"recoil": 0.3, "spread": 0.65, "reload": 1.35},
+		"desc": "一隻完全不會抖的手：後座和散佈都小很多。但關節很僵，換彈慢。"},
+	# Underbarrel
+	"hound_fang": {"name": "獵犬的牙", "slot": "underbarrel", "price": 0, "organ": true, "monster": "hounds",
+		"weight": 1.1, "fits": "all", "x": {"spread": 1.15}, "effects": {"bayonet": true, "fang": true},
+		"desc": "一整副獵犬的下顎：近戰（V）傷害三倍，咬到的東西會慢下來。很重，槍口會往下沉。"},
+	"dropper_arm": {"name": "吊頂者的長臂", "slot": "underbarrel", "price": 0, "organ": true, "monster": "dropper",
+		"weight": 1.3, "fits": "all", "x": {"rate": 0.85}, "effects": {"knock": -2.0},
+		"desc": "打中的東西會被長臂往你這邊拖。手臂很長很晃，射速慢一點。"},
+	# Ammo
+	"colossus_heart": {"name": "鍋爐巨像的心", "slot": "ammo", "price": 0, "organ": true, "monster": "colossus",
+		"weight": 1.5, "fits": ["gun", "bolt"], "x": {"noise": 1.8}, "effects": {"burn": 3.0, "explode": 2.0},
+		"desc": "子彈帶著鍋爐的火：命中會燒起來、小爆炸（隊友也炸得到）。每一槍都像鍋爐排氣一樣大聲。"},
+	"spitter_sac": {"name": "噴吐者的酸囊", "slot": "ammo", "price": 0, "organ": true, "monster": "spitter",
+		"weight": 0.8, "fits": ["gun", "bolt"], "x": {"damage": 0.8}, "effects": {"acid": 8.0},
+		"desc": "打到的地方留下一灘酸，站在上面的怪物會被溶掉（你自己踩到也會）。直接傷害少一點。"},
+	"weaver_gland": {"name": "蛛網腺", "slot": "ammo", "price": 0, "organ": true, "monster": "weaver",
+		"weight": 0.5, "fits": ["gun", "bolt"], "x": {"damage": 0.5}, "effects": {"slow": 5.0, "stun": 0.6, "web": true},
+		"desc": "子彈噴出黏網：打到的怪物被纏住，慢 5 秒。網很軟，傷害只剩一半。"},
+	# Gadget
+	"mother_musicbox": {"name": "母親的音盒", "slot": "gadget", "price": 0, "organ": true, "monster": "mother",
+		"weight": 1.0, "fits": "all", "x": {"damage": 0.8}, "effects": {"lullaby": true},
+		"desc": "打中的地方會響起搖籃曲：附近的怪物會停下來、慢慢的聽一陣子。但溫柔的曲子讓子彈軟了兩成。"},
+	"rat_spring": {"name": "發條鼠的發條", "slot": "gadget", "price": 0, "organ": true, "monster": "rats",
+		"weight": 0.3, "fits": "all", "x": {"rate": 1.6, "spread": 1.4, "recoil": 1.3},
+		"desc": "把發條上滿：射速快六成。但整把槍抖個不停。"},
+	"tuner_cords": {"name": "調音師的聲帶", "slot": "gadget", "price": 0, "organ": true, "monster": "tuner",
+		"weight": 0.2, "fits": "all", "x": {"damage": 0.85}, "effects": {"stun": 0.6},
+		"desc": "打中的怪物會聽到不存在的聲音，錯亂一下（麻痺 0.6 秒）。傷害少一點。"},
+	"child_marble": {"name": "孩子的玻璃珠", "slot": "gadget", "price": 0, "organ": true, "monster": "child",
+		"weight": 0.1, "fits": "all", "x": {"spread": 1.3}, "effects": {"bounty": 3.0},
+		"desc": "殺死怪物時牠會掉下一件好東西（比招財貓好得多）。但珠子裡的眼睛一直看著你，讓你瞄不準。"},
 }
 
 const STARTER := {"frame": "revolver", "parts": {}}
@@ -225,6 +308,20 @@ static func name_of(id: String) -> String:
 
 static func price_of(id: String) -> int:
 	return FRAMES.get(id, PARTS.get(id, {})).get("price", 0)
+
+
+## Organs come out of monsters: they can't be bought, only owned.
+static func is_organ(id: String) -> bool:
+	return PARTS.get(id, {}).get("organ", false)
+
+
+## Every organ part id, in the order they are listed.
+static func organ_ids() -> Array[String]:
+	var result: Array[String] = []
+	for id in PARTS:
+		if PARTS[id].get("organ", false):
+			result.append(id)
+	return result
 
 
 ## Can this part go on this frame?
@@ -300,7 +397,11 @@ static func stats(build: Dictionary) -> Dictionary:
 			result[stat] = p["="][stat]
 		for effect in p.get("effects", {}):
 			var value = p.effects[effect]
-			if result.effects.has(effect) and value is float:
+			if result.effects.has(effect) and effect == "knock" and float(value) < 0.0:
+				result.effects[effect] = value  # a pull (harpoon, dropper's arm) beats a shove
+			elif result.effects.has(effect) and effect == "ghost":
+				result.effects[effect] = mini(int(result.effects[effect]), int(value))
+			elif result.effects.has(effect) and value is float:
 				result.effects[effect] = maxf(result.effects[effect], value)
 			else:
 				result.effects[effect] = value

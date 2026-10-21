@@ -6,8 +6,9 @@ extends CharacterBody3D
 ## Rules players can learn:
 ##   - Find it first (shine your lantern on it) and it leaves you a rare present.
 ##   - It always hides next to a toy.
-##   - Let the time run out and it comes looking: if it reaches you, your lantern
-##     breaks and every scavenger's position is called out to the monsters.
+##   - Let the time run out and it comes looking for whoever heard it counting: if it
+##     reaches you, your lantern goes out and the players in its game are called out
+##     to the monsters. Anyone who never heard it count isn't playing, and isn't told on.
 ## Tells: laughter far off, and counting to ten.
 
 const HEIGHT := 1.1
@@ -39,6 +40,8 @@ var _agent: NavigationAgent3D
 var _model: Node3D
 var _toy: Node3D
 var _timer := 0.0
+## Who heard it counting: the only ones it seeks and tells on.
+var _players: Array[Player] = []
 var _giggle := 6.0
 
 
@@ -93,11 +96,10 @@ func _think(delta: float) -> void:
 				_found(finder)
 			elif _timer <= 0.0:
 				state = State.SEEK
-				var nearest := MonsterKit.nearest_player(self)
-				if nearest != null:
-					MonsterKit.tell(nearest, &"remote_warn", ["「時間到了～換我來找你囉！」", 0.2])
+				for player in _playing():
+					MonsterKit.tell(player, &"remote_warn", ["「時間到了～換我來找你囉！」", 0.2])
 		State.SEEK:
-			var target := MonsterKit.nearest_player(self)
+			var target := _nearest_playing()
 			if target == null:
 				_stand()
 				return
@@ -135,8 +137,10 @@ func found_by() -> Player:
 func _invite() -> void:
 	state = State.COUNT
 	_timer = COUNT_TIME
+	_players.clear()
 	for player in MonsterKit.active_players(get_tree()):
 		if player.global_position.distance_to(global_position) < INVITE_RANGE * 1.5:
+			_players.append(player)
 			MonsterKit.tell(player, &"remote_warn", ["「一、二、三…數到十喔！」有個小孩要跟你玩捉迷藏。用提燈照到它就算你贏。", 0.0])
 	_play.rpc("giggle", 1.0)
 
@@ -172,8 +176,8 @@ func _tagged(player: Player) -> void:
 	MonsterKit.tell(player, &"remote_snuff")
 	MonsterKit.tell(player, &"remote_warn", ["「找到你了！」小孩大聲喊出每個人的位置…", 0.5])
 	_play.rpc("giggle", 0.7)
-	# Everyone gets called out: monsters and the guardian hear where each scavenger is.
-	for other in MonsterKit.active_players(get_tree()):
+	# Everyone in its game gets called out: every monster hears where they are.
+	for other in _playing():
 		GameNoise.emit(get_tree(), other.global_position, REVEAL_RADIUS, GameNoise.Kind.VOICE)
 	_leave()
 
@@ -188,7 +192,7 @@ func on_hit(hit: Dictionary) -> float:
 			if attacker != null:
 				MonsterKit.tell(attacker, &"remote_warn", ["「你作弊！」小孩大聲喊出每個人的位置…", 0.4])
 			_play.rpc("giggle", 0.6)
-			for other in MonsterKit.active_players(get_tree()):
+			for other in _playing():
 				GameNoise.emit(get_tree(), other.global_position, REVEAL_RADIUS, GameNoise.Kind.VOICE)
 			_leave()
 		State.SEEK:
@@ -222,7 +226,28 @@ func set_spotted(on: bool) -> void:
 		glow.queue_free()
 
 
+## The players still in its game (alive and in the run).
+func _playing() -> Array[Player]:
+	var result: Array[Player] = []
+	for player in _players:
+		if is_instance_valid(player) and player.is_active():
+			result.append(player)
+	return result
+
+
+func _nearest_playing() -> Player:
+	var best: Player = null
+	var best_distance := INF
+	for player in _playing():
+		var distance := player.global_position.distance_to(global_position)
+		if distance < best_distance:
+			best = player
+			best_distance = distance
+	return best
+
+
 func _leave() -> void:
+	_players.clear()
 	state = State.AWAY
 	_timer = AWAY_TIME
 	global_position = Vector3(global_position.x, -40.0, global_position.z)

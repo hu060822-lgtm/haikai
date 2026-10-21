@@ -2,8 +2,8 @@ class_name ThirdRail
 extends Trap
 ## A stretch of the live third rail with its yellow guard board knocked off, running
 ## along local x on squat ceramic insulators. While the map's power is on, stepping on
-## it throws you back with a bang and a jolt; a blackout (or before the guardian cuts
-## the power) makes it safe. Footprint 2.6 x 0.5, free-standing.
+## it throws you back with a bang and a jolt; with the map's power
+## off it is safe. Footprint 2.6 x 0.5, free-standing.
 ## Tell: it hums, a blue spark jumps off the broken end every few seconds, and the guard
 ## board lies in the dirt next to it.
 

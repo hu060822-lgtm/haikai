@@ -182,7 +182,7 @@ func _think(delta: float) -> void:
 
 func _find_target() -> Player:
 	var best: Player = null
-	var best_distance := NOTICE_RANGE
+	var best_distance := MonsterKit.sight(NOTICE_RANGE)
 	var station: Node = Run.instance.level if Run.instance != null else null
 	for player in MonsterKit.active_players(get_tree()):
 		var distance := player.global_position.distance_to(global_position)

@@ -9,9 +9,10 @@ var cause := ""
 var items: Array = []
 var payout := {}
 var lost_gear: Array = []
-## From the session: {extracted, threshold, guardian_won, guardian}.
+## Organ part ids carried out this run (they went into the stash, not into money).
+var organs: Array = []
+## From the session: {extracted, scavengers, squads, squad_totals}.
 var summary := {}
-var as_guardian := false
 
 
 func _ready() -> void:
@@ -34,11 +35,7 @@ func _ready() -> void:
 
 	var headline := ""
 	var color := UiKit.TEXT
-	if as_guardian:
-		var won: bool = summary.get("guardian_won", false)
-		headline = "守墓者勝利" if won else "他們逃掉了"
-		color = UiKit.COLD if won else UiKit.DANGER
-	elif survived:
+	if survived:
 		headline = "撤離成功"
 		color = UiKit.ACCENT
 	else:
@@ -54,14 +51,9 @@ func _ready() -> void:
 	body.add_theme_constant_override("separation", 8)
 	card.add_child(body)
 
-	if as_guardian:
-		var won: bool = summary.get("guardian_won", false)
-		body.add_child(_row("搜刮者撤出", "$%d" % summary.get("extracted", 0)))
-		body.add_child(_row("門檻", "$%d" % summary.get("threshold", 0)))
-		body.add_child(_row("守墓者報酬", "+$%d" % (GameState.GUARDIAN_WIN_REWARD if won else GameState.GUARDIAN_LOSS_REWARD), UiKit.ACCENT, 24))
-	elif survived:
+	if survived:
 		if items.is_empty():
-			body.add_child(UiKit.label("空手而回。至少你還活著。", 20))
+			body.add_child(UiKit.label("空手而回。至少你還活著。" if organs.is_empty() else "沒帶出能賣錢的東西。", 20))
 		else:
 			body.add_child(UiKit.heading("帶出來的東西", "%d 件" % items.size()))
 			var scroll := ScrollContainer.new()
@@ -78,6 +70,13 @@ func _ready() -> void:
 				body.add_child(_row("湊成一組的獎勵", "+$%d" % payout.bonus, UiKit.HOT, 18))
 			body.add_child(_rule())
 			body.add_child(_row("這次賺到", "$%d" % payout.total, UiKit.ACCENT, 30))
+		if not organs.is_empty():
+			var names := []
+			for id in organs:
+				names.append(Arsenal.name_of(str(id)))
+			var brought := UiKit.label("帶回器官：" + "、".join(names) + "（已放進倉庫，可以裝到槍上）", 17, Bestiary.ORGAN)
+			brought.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			body.add_child(brought)
 	else:
 		body.add_child(UiKit.label(cause, 22))
 		var dropped := UiKit.label("背包裡的 %d 件物品都掉在你倒下的地方了。" % items.size(), 17, UiKit.DIM)
@@ -90,12 +89,8 @@ func _ready() -> void:
 			lost.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			body.add_child(lost)
 
-	if not as_guardian and not summary.is_empty():
-		var keeper: String = summary.get("guardian", "")
-		var who := "守墓者「%s」" % keeper if keeper != "" else "AI 守墓者"
-		var line := "全隊撤出 $%d／門檻 $%d：%s" % [summary.get("extracted", 0), summary.get("threshold", 0),
-			who + "贏了" if summary.get("guardian_won", false) else "你們贏過了" + who]
-		var team := UiKit.label(line, 16, UiKit.DIM)
+	if not summary.is_empty() and summary.get("scavengers", 1) > 1:
+		var team := UiKit.label("所有人一共撤出 $%d" % summary.get("extracted", 0), 16, UiKit.DIM)
 		team.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		column.add_child(team)
 	var squads: Array = summary.get("squads", [])
@@ -157,6 +152,6 @@ func _squad_ranking(squads: Array, totals: Dictionary) -> Label:
 	var parts := []
 	for i in ranked.size():
 		var squad: int = ranked[i]
-		var you := "（你們）" if squad == mine and not as_guardian else ""
+		var you := "（你們）" if squad == mine else ""
 		parts.append("%d. %s%s $%d" % [i + 1, Session.SQUAD_NAMES[squad], you, totals.get(squad, 0)])
 	return UiKit.label("小隊排名　" + "　".join(parts), 18, UiKit.ACCENT)

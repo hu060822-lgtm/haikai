@@ -13,8 +13,8 @@ func _run() -> void:
 	GameState.save_enabled = false
 	GameState.reset()
 	Run.forced_monsters = ["colossus"]
-	Run.director_enabled = false
 	Run.forced_map = "factory"
+	Awakening.frozen = true
 	_test_economy()
 	_test_content()
 	await _test_gunsmith()
@@ -24,8 +24,8 @@ func _run() -> void:
 	await _test_death()
 	await _test_mannequin()
 	await _test_mimic()
-	await _test_field_control()
-	await _test_director()
+	await _test_gates()
+	await _test_awakening()
 	await _test_watcher()
 	await _test_greeter()
 	await _test_collector()
@@ -37,7 +37,9 @@ func _run() -> void:
 	await _test_child()
 	_failures += await load("res://tests/monster_b_tests.gd").new().run(self)
 	_failures += await load("res://tests/monster_a_tests.gd").new().run(self)
+	_failures += await load("res://tests/organ_tests.gd").new().run(self)
 	await _test_items()
+	await _test_bulky()
 	await _test_gear()
 	await _test_combat()
 	await _test_squads()
@@ -130,11 +132,12 @@ func _test_content() -> void:
 	var ids := {}
 	for item in LootTable.ITEMS:
 		ids[item.id] = true
-	_check(LootTable.ITEMS.size() == 100 and ids.size() == 100, "100 distinct loot items (%d)" % LootTable.ITEMS.size())
+	_check(LootTable.ITEMS.size() == 130 and ids.size() == 130, "130 distinct loot items (%d)" % LootTable.ITEMS.size())
 	var pool_rng := RandomNumberGenerator.new()
 	pool_rng.seed = 11
 	var pool := LootTable.make_pool(pool_rng)
-	_check(pool.size() == 31 and not 94 in pool, "each run draws a pool of 31 kinds, never the colossus bolt (%d)" % pool.size())
+	_check(pool.size() == 34 and not 94 in pool, "each run draws a pool of 34 kinds, never the colossus bolt (%d)" % pool.size())
+	_check(pool.all(func(id: int) -> bool: return not LootTable.is_bulky(LootTable.find(id))), "bulky hauls never go in the backpack pool")
 	var pooled := true
 	for i in 200:
 		if not LootTable.roll(pool_rng, 0.5, pool).id in pool:
@@ -220,10 +223,18 @@ func _test_mimic() -> void:
 	player.use_boost()
 	_check("adrenaline" in player.boosts, "a bitten hand can't use gear")
 	_check(not mimic.disguised, "the mimic drops its disguise and runs")
+	var ear := _TrapEar.new()
+	ear.add_to_group("listeners")
+	root.add_child(ear)
 	var other: Mimic = mimics[1]
 	other.pry(player)
 	await _frames(5)
 	_check(not is_instance_valid(other), "a knife poke kills a mimic")
+	_check(ear.loudest(GameNoise.Kind.VOICE) == 0.0, "a blade kills it quietly")
+	main.run.host_damage_monster(mimic, 500.0, {}, player.global_position, player)
+	await _frames(3)
+	_check(ear.loudest(GameNoise.Kind.VOICE) >= Mimic.SHRIEK_RADIUS, "a shot one dies shrieking")
+	ear.queue_free()
 	await _end_run(main)
 	Run.forced_monsters = ["colossus"]
 
@@ -472,10 +483,17 @@ func _test_child() -> void:
 	player.set_lantern(true)
 	await _frames(10)
 	_check(child.state == HideChild.State.AWAY and main.run.loot_root.get_child_count() > loot_before, "finding it first earns a present")
+	# Only someone who heard it counting is in its game.
+	child.global_position = Vector3(2, 0.1, 2)
+	child.state = HideChild.State.SEEK
+	child._players.clear()
+	player.rotation.y = PI
+	await _frames(90)
+	_check(player.lantern_on, "it never comes for someone who wasn't playing")
 	child.global_position = Vector3(2, 0.1, 2)
 	child.state = HideChild.State.HIDE
+	child._players.assign([player])
 	child._timer = 0.0
-	player.rotation.y = PI
 	var waited := 0
 	while player.lantern_on and waited < 400:
 		await physics_frame
@@ -551,6 +569,153 @@ func _test_items() -> void:
 	await _frames(40)
 	_check(player.velocity.y >= -Player.UMBRELLA_FALL_SPEED - 0.5 and not player.is_dead, "an umbrella slows your fall")
 	await _end_run(main)
+
+
+func _test_bulky() -> void:
+	print("bulky")
+	var hauls := 0
+	var hauls_ok := true
+	var fillers := 0
+	var fillers_ok := true
+	for item: Dictionary in LootTable.ITEMS:
+		if LootTable.is_bulky(item):
+			hauls += 1
+			hauls_ok = hauls_ok and item.weight >= 20.0 and item.weight <= 120.0 and item.value >= 200 and item.value <= 1500
+		elif item.id >= 121:
+			fillers += 1
+			fillers_ok = fillers_ok and item.weight >= 4.0 and item.weight <= 15.0 and item.value <= 40
+	_check(hauls >= 20 and hauls_ok, "%d bulky hauls, 20-120 kg and $200-1500 each" % hauls)
+	_check(fillers == 10 and fillers_ok, "10 heavy-but-cheap fillers (4-15 kg, $40 or less)")
+	var themes := {}
+	for item: Dictionary in LootTable.ITEMS:
+		if LootTable.is_bulky(item):
+			themes[item.get("theme", "")] = true
+	_check(themes.has("factory") and themes.has("mall") and themes.has("subway") and themes.has("dream"), "bulky hauls cover all four maps")
+
+	var main = await _new_run()
+	var player: Player = main.player
+	main.colossus.process_mode = Node.PROCESS_MODE_DISABLED
+	main.colossus.global_position = Vector3(0, 0, -100)
+	var placed := get_nodes_in_group("loot").filter(func(node: LootItem) -> bool: return node.carry != null)
+	_check(placed.size() >= LootTable.BULKY_COUNT.x and placed.size() <= LootTable.BULKY_COUNT.y, "the map places 2-5 bulky hauls (%d)" % placed.size())
+	var cam: Camera3D = player.get_viewport().get_camera_3d()
+	var safe: LootItem = Run.instance.host_spawn_loot(LootTable.make(101), player.global_position - player.global_basis.z * 1.4 + Vector3.UP * 0.5, 0.0, true)
+	await _frames(4)
+	_check(safe.get_prompt(player).contains("按住 E"), "a bulky item asks you to hold E")
+	# Walking speed with empty hands, then with the safe.
+	var free := await _walk_speed(player, false)
+	var mag := player.mag_ammo
+	player.grab_bulky(safe)
+	await _frames(3)
+	_check(player.held_bulky == safe and safe.carry.holders == PackedInt32Array([1]), "grabbing puts the safe in your hands")
+	_check(player.items.is_empty() and player.carried_weight == 0.0, "a bulky haul doesn't go in the backpack")
+	_check(safe.global_position.distance_to(player.global_position) < 1.6, "the safe sits in front of you")
+	player.hold_trigger = true
+	await _frames(20)
+	player.hold_trigger = false
+	_check(player.mag_ammo == mag, "you can't shoot with your hands full")
+	var loaded := await _walk_speed(player, true)
+	_check(loaded < free * 0.6, "the safe slows you down, no sprinting (%.2f vs %.2f m/s)" % [loaded, free])
+	var yaw := player.rotation.y
+	player.look(Vector2(200, 0))
+	var turned := absf(player.rotation.y - yaw)
+	_check(turned < 200 * Player.MOUSE_SENSITIVITY * 0.8, "turning is slower while hauling")
+	_check(safe.global_position.distance_to(player.global_position) < 1.6, "the safe follows you")
+
+	# A teammate takes the other end.
+	var helper := Player.new()
+	helper.name = "2"
+	helper.display_name = "幫手"
+	helper.set_multiplayer_authority(2)
+	helper.build_sync()
+	Run.instance.players_root.add_child(helper)
+	helper.global_position = player.global_position + player.global_basis.x * 1.6
+	await _frames(2)
+	var alone_load := player.bulky_load()
+	var alone_factor := player.bulky_factor()
+	_check(safe.carry.host_grab(2), "a teammate can grab the other side")
+	await _frames(2)
+	_check(player.bulky_load() < alone_load * 0.5 and player.bulky_factor() > alone_factor + 0.2,
+		"two carrying is much lighter (%.0f kg vs %.0f kg each)" % [player.bulky_load(), alone_load])
+	var mid := (player.global_position + helper.global_position) / 2.0
+	_check(Vector2(safe.global_position.x - mid.x, safe.global_position.z - mid.z).length() < 0.3, "the safe hangs between the two carriers")
+	helper.global_position += player.global_basis.x * 4.0
+	await _frames(3)
+	_check(safe.carry.holders.size() == 1, "walking too far apart makes the second carrier let go")
+
+	# Putting it down makes a racket.
+	var noises: Array = []
+	var ear := _NoiseEar.new()
+	ear.heard = noises
+	main.add_child(ear)
+	Awakening.frozen = false
+	var level_before: float = Run.instance.awakening.level
+	player.release_bulky()
+	await _frames(30)
+	Awakening.frozen = true
+	_check(player.held_bulky == null and not safe.carry.is_held() and not safe.freeze, "E puts it down and it falls")
+	_check(noises.any(func(n: Array) -> bool: return n[1] >= 12.0), "dropping it is loud (%s)" % [noises])
+	_check(Run.instance.awakening.level > level_before + 2.0, "and wakes the ruin (+%.1f)" % (Run.instance.awakening.level - level_before))
+	ear.queue_free()
+
+	# A hard hit knocks it out of your hands.
+	player.grab_bulky(safe)
+	await _frames(3)
+	player.take_damage(20.0, "test")
+	await _frames(2)
+	_check(player.held_bulky == null and not safe.carry.is_held(), "a hard hit makes you drop it")
+	helper.queue_free()
+
+	# Extraction pays for the haul in your hands and one set down on the pad.
+	GameState.money = 0
+	var zone: ExtractionZone = main.level.extraction_zone
+	var crate: LootItem = Run.instance.host_spawn_loot(LootTable.make(110), zone.global_position + Vector3(0.6, -0.9, 0.6), 0.0, true)
+	player.global_position = zone.global_position - Vector3(0.0, 1.2, 0.0)
+	safe.global_position = player.global_position + Vector3(0, 0.8, -0.8)
+	await _frames(3)
+	player.health = Player.MAX_HEALTH
+	player.grab_bulky(safe)
+	await _frames(3)
+	_check(player.held_bulky == safe, "grab the safe again on the pad")
+	var worth: int = safe.value + crate.value
+	main.level.lever.interact(player)
+	var waited := 0
+	while main.run_active and waited < 400:
+		await physics_frame
+		waited += 1
+	_check(not main.run_active and main.last_result.survived, "extracting with a haul ends the run alive")
+	_check(GameState.money == worth, "the haul in hand and the one on the pad are paid ($%d of $%d)" % [GameState.money, worth])
+	_check(not is_instance_valid(safe) or safe.is_queued_for_deletion(), "the extracted haul leaves the world")
+	await _end_run(main)
+
+
+## Average ground speed over a second of walking forward (sprint held when asked).
+func _walk_speed(player: Player, sprint: bool) -> float:
+	await _frames(10)
+	var start := player.global_position
+	Input.action_press("move_back")
+	if sprint:
+		Input.action_press("sprint")
+	await _frames(60)
+	Input.action_release("move_back")
+	Input.action_release("sprint")
+	var moved := Vector2(player.global_position.x - start.x, player.global_position.z - start.z).length()
+	# Walk back where we came from so the next measurement starts in the same place.
+	Input.action_press("move_forward")
+	await _frames(60)
+	Input.action_release("move_forward")
+	await _frames(20)
+	return moved
+
+
+class _NoiseEar extends Node:
+	var heard: Array = []
+
+	func _ready() -> void:
+		add_to_group("listeners")
+
+	func hear(position: Vector3, radius: float, kind: int) -> void:
+		heard.append([position, radius, kind])
 
 
 func _test_gear() -> void:
@@ -771,24 +936,17 @@ func _test_combat() -> void:
 	Run.forced_monsters = ["colossus"]
 
 
-func _test_field_control() -> void:
-	print("field control")
+func _test_gates() -> void:
+	print("gates")
 	var main = await _new_run()
 	main.colossus.process_mode = Node.PROCESS_MODE_DISABLED
 	var player: Player = main.player
-	var field: FieldControl = main.run.field
 	var level: BoilerFactory = main.level
 	_check(level.gates.size() >= 4, "the factory has its 4 gates, plus any in the wings")
-	var before := field.energy
-	GameNoise.emit(self, player.global_position, 14.0, GameNoise.Kind.FOOTSTEP)
-	_check(field.energy > before, "scavenger noise feeds the guardian's energy")
-	field.energy = 10.0
-	_check(not field.use_gate(0), "no energy, no gate")
-	field.energy = 100.0
 	player.global_position = Vector3(4.0, 0.1, 19.0)
-	_check(field.use_gate(0) and level.gates[0].closed, "a gate can be slammed shut")
-	_check(field.energy == 75.0 and not field.can_use("gate"), "it costs energy and goes on cooldown")
+	main.run.host_set_gate(0, true)
 	await _frames(5)
+	_check(level.gates[0].closed, "a gate can be slammed shut")
 	# The tool-room door now blocks the way in.
 	player.global_position = Vector3(-8.0, 0.1, 16.5)
 	player.rotation.y = PI / 2.0  # face -x, into the room
@@ -796,52 +954,107 @@ func _test_field_control() -> void:
 	await _frames(90)
 	Input.action_release("move_forward")
 	_check(player.global_position.x > -9.4, "a closed gate blocks the doorway (x=%.2f)" % player.global_position.x)
-	field._gate_timers[0] = 0.01
+	main.run.host_set_gate(0, false)
 	await _frames(5)
-	_check(not level.gates[0].closed, "the gate rolls back up after a while")
-	# Can't shut a gate on someone standing in it.
-	field.cooldowns.gate = 0.0
-	player.global_position = Vector3(-9.5, 0.1, 16.5)
-	await _frames(3)
-	_check(not field.use_gate(0), "a gate won't close on a player in the doorway")
-
+	_check(not level.gates[0].closed, "the gate rolls back up")
 	main.level.lever.interact(player)
 	_check(level.extraction_zone.powered, "lever powers the lift")
-	_check(field.use_power() and not level.extraction_zone.powered, "a blackout stops the lift")
-	field._power_timer = 0.01
-	await _frames(5)
-	_check(level.extraction_zone.powered, "power comes back after the blackout")
-
-	field.energy = 100.0
-	var mimics_before: int = main.run.monsters_root.get_children().filter(func(n) -> bool: return n is Mimic).size()
-	_check(not field.use_monster("mimic", player.global_position + Vector3(1, 0, 0)), "can't release a monster on top of someone")
-	_check(field.use_monster("mimic", Vector3(0, 0.1, -8.0)), "can release a monster away from players")
-	await _frames(3)
-	var mimics_after: int = main.run.monsters_root.get_children().filter(func(n) -> bool: return n is Mimic).size()
-	_check(mimics_after == mimics_before + 1, "the released mimic appears")
 	await _end_run(main)
 
 
-func _test_director() -> void:
-	print("director")
-	Run.director_enabled = true
-	var main = await _new_run()
-	Run.director_enabled = false
+class _TickDummy extends Node3D:
+	var ticks := 0
+
+	func _physics_process(_delta: float) -> void:
+		ticks += 1
+
+
+## 會醒來的廢墟: noise and light wake the map, stages ratchet, waves, sharper monsters.
+func _test_awakening() -> void:
+	print("awakening")
+	Awakening.frozen = false
+	var main = await _new_run({"build": Arsenal.STARTER})
 	main.colossus.process_mode = Node.PROCESS_MODE_DISABLED
-	var director: Director = main.run.director
-	_check(director != null, "the AI director stands in when nobody is the guardian")
+	main.colossus.global_position = Vector3(0, 0, -100)
+	var run: Run = main.run
+	var awake: Awakening = run.awakening
 	var player: Player = main.player
-	var field: FieldControl = main.run.field
-	field.energy = 100.0
-	main.level.lever.interact(player)
-	player.global_position = main.level.extraction_zone.global_position + Vector3(0, -1.2, 4.0)
+	_check(awake != null and Run.instance.awakening == awake, "the run has an awakening")
+	_check(awake.stage == 0 and Awakening.sense_mult() == 1.0 and Awakening.speed_mult() == 1.0, "it starts asleep (沉睡)")
+	_check(main.hud.awakening_meter != null, "the HUD shows the awakening eye")
+	# Footsteps barely register; one gunshot wakes it far more than a lot of running.
+	awake.level = 0.0
+	for i in 10:
+		GameNoise.emit(self, player.global_position, Player.STEP_NOISE.sprint, GameNoise.Kind.FOOTSTEP)
+	var steps := awake.level
+	awake.level = 0.0
+	run.host_fire(Arsenal.stats(Arsenal.STARTER), player.head_position(), [Vector3(0, 0, -1)], player)
+	var shot := awake.level
+	_check(steps > 0.0 and steps < 1.0, "ten sprinting footsteps wake it a tiny bit (%.2f)" % steps)
+	_check(shot > steps * 4.0, "one gunshot wakes it far more than footsteps (%.2f vs %.2f)" % [shot, steps])
+	awake.level = 0.0
+	GameNoise.emit(self, player.global_position, 9.0, GameNoise.Kind.VOICE)
+	var talk := awake.level
+	awake.level = 0.0
+	GameNoise.emit(self, player.global_position, 15.0, GameNoise.Kind.MUSIC)
+	var music := awake.level
+	_check(talk > 0.0 and talk < music and music < shot, "talking wakes it a little, music more (%.2f, %.2f)" % [talk, music])
+	# A lit lantern trickles; the time trickle never stops.
+	player.set_lantern(true)
+	awake.level = 0.0
+	awake.elapsed = 0.0
+	awake._process(10.0)
+	var lit := awake.level
+	player.set_lantern(false)
+	awake.level = 0.0
+	awake.elapsed = 0.0
+	awake._process(10.0)
+	var dark := awake.level
+	_check(lit > dark and dark > 0.0, "a lit lantern wakes it faster than the dark (%.3f vs %.3f)" % [lit, dark])
+
+	# Quiet settles it, but never below the current stage's floor; stages only go up.
+	var before := run.live_monsters().size()
+	var kinds_before := run.monster_kinds.size()
+	awake.add(45.0)
+	_check(awake.stage == 1, "past 34 it is startled (驚醒)")
+	await _frames(5)
+	_check(run.live_monsters().size() >= before + 3, "a wave wakes up (%d -> %d monsters)" % [before, run.live_monsters().size()])
+	_check(run.monster_kinds.size() > kinds_before, "the wave brings a kind that wasn't in the run (%s)" % [run.monster_kinds])
+	awake._quiet = 100.0
+	for i in 200:
+		awake._process(0.5)
+	_check(absf(awake.level - Awakening.FLOORS[1]) < 0.5 and awake.stage == 1, "quiet settles it down to the stage floor, not below (%.1f)" % awake.level)
+	_check(Awakening.sense_mult() == 1.3 and Awakening.speed_mult() == 1.1, "驚醒 sharpens senses x1.3, speed x1.1")
+	_check(is_equal_approx(MonsterKit.sight(10.0), 13.0), "monster sight ranges scale with it")
+	var ear := _TrapEar.new()
+	ear.add_to_group("listeners")
+	root.add_child(ear)
+	GameNoise.emit(self, player.global_position, 10.0, GameNoise.Kind.FOOTSTEP)
+	_check(is_equal_approx(ear.loudest(GameNoise.Kind.FOOTSTEP), 13.0), "monsters hear noise carry further (%.1f)" % ear.loudest())
+	ear.queue_free()
+
+	# 暴走: fastest monsters, and the lift takes twice as long, its light pulsing red.
+	var zone: ExtractionZone = main.level.extraction_zone
+	var hold: float = zone.hold_time
+	var dummy := _TickDummy.new()
+	dummy.set_meta("kind", "dummy")
+	run.monsters_root.add_child(dummy)
+	await _frames(100)
+	var calm_ticks := dummy.ticks
+	before = run.live_monsters().size()
+	awake.host_force_stage(2)
+	_check(awake.stage == 2 and Awakening.speed_mult() == 1.2 and Awakening.sense_mult() == 1.6, "it can rampage (暴走): x1.6 senses, x1.2 speed")
 	await _frames(3)
-	_check(director.decide() == "power", "the director cuts the power when someone nears the lift")
-	field.energy = 100.0
-	player.global_position = Vector3(-8.0, 0.1, 16.5)
-	await _frames(3)
-	_check(director.decide() == "gate", "the director slams a gate near a scavenger")
-	GameState.reset()
+	_check(run.live_monsters().size() >= before + 4, "暴走 wakes another wave")
+	dummy.ticks = 0
+	await _frames(100)
+	_check(calm_ticks >= 105 and calm_ticks <= 115 and dummy.ticks >= 115, "monsters think 10%% faster at 驚醒, 20%% at 暴走 (%d, %d ticks per 100 frames)" % [calm_ticks, dummy.ticks])
+	_check(is_equal_approx(zone.hold_time, hold * 2.0) and zone.alarm, "at 暴走 the lift takes twice as long (%.1fs) and pulses red" % zone.hold_time)
+	awake.level = 0.0
+	awake._process(0.1)
+	_check(awake.stage == 2 and awake.level >= Awakening.FLOORS[2], "a rampage never calms back down")
+	dummy.queue_free()
+	Awakening.frozen = true
 	await _end_run(main)
 
 
@@ -1170,7 +1383,7 @@ func _test_maps() -> void:
 		_check(player.is_on_floor(), "%s: player lands on the floor" % id)
 		_check(main.run.loot_root.get_child_count() >= level.loot_count.x, "%s: loot spawns (%d)" % [id, main.run.loot_root.get_child_count()])
 		_check(level.loot_spots.all(func(spot: Vector3) -> bool: return level.in_bounds(spot)), "%s: loot spots are inside the map" % id)
-		_check(level.gates.size() >= 4, "%s: guardian has gates to close (%d)" % [id, level.gates.size()])
+		_check(level.gates.size() >= 4, "%s: has gates that can slam shut (%d)" % [id, level.gates.size()])
 		var nav_map: RID = level.get_world_3d().navigation_map
 		var off_mesh := level.patrol_points.filter(func(point: Vector3) -> bool:
 			return NavigationServer3D.map_get_closest_point(nav_map, point).distance_to(point) > 1.0)

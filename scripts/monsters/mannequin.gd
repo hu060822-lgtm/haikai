@@ -101,7 +101,7 @@ func _think(delta: float) -> void:
 		move_and_slide()
 		return
 
-	var target := MonsterKit.nearest_player(self, HUNT_RANGE)
+	var target := MonsterKit.nearest_player(self, MonsterKit.sight(HUNT_RANGE))
 	var speed := SPEED
 	if target != null:
 		_agent.target_position = target.global_position

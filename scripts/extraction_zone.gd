@@ -20,7 +20,16 @@ var powered := false:
 			var glow := Color(0.2, 0.6, 0.3) if value else Color(0.5, 0.1, 0.08)
 			_marks.material_override = PS1Materials.get_material("concrete", glow * 1.4, true, Vector2.ONE, glow * 0.6)
 
+## 暴走: the ruin is rampaging; the light pulses red over the pad (Awakening sets it,
+## along with a doubled hold_time).
+var alarm := false:
+	set(value):
+		alarm = value
+		if not alarm and _light != null:
+			powered = powered
+
 var _player: Player = null
+var _clock := 0.0
 var _elapsed := 0.0
 var _done := false
 var _light: OmniLight3D
@@ -49,6 +58,16 @@ func _ready() -> void:
 	powered = powered
 	body_entered.connect(_on_body_entered)
 	body_exited.connect(_on_body_exited)
+
+
+func _process(delta: float) -> void:
+	if not alarm or _light == null:
+		return
+	_clock += delta
+	var pulse := 0.5 + 0.5 * sin(_clock * 5.0)
+	var base := Color(0.5, 1.0, 0.6) if powered else Color(1.0, 0.25, 0.2)
+	_light.light_color = base.lerp(Color(1.0, 0.05, 0.02), pulse)
+	_light.light_energy = 1.0 + 1.2 * pulse
 
 
 func _physics_process(delta: float) -> void:

@@ -299,7 +299,7 @@ func _spot() -> Player:
 	for player in MonsterKit.active_players(get_tree()):
 		var chest := player.global_position + Vector3.UP
 		var distance := eye.distance_to(chest)
-		var sight := SIGHT_LIT if player.is_lit() else SIGHT_DARK
+		var sight := MonsterKit.sight_of(player, SIGHT_LIT, SIGHT_DARK)
 		if distance < sight and distance < best_distance \
 				and MonsterKit.clear_line(get_world_3d(), eye, chest, [get_rid()]):
 			best = player

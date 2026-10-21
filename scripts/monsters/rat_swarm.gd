@@ -160,7 +160,7 @@ func _think(delta: float) -> void:
 			return
 
 	if _target == null or not is_instance_valid(_target) or not _target.is_active() \
-			or _target.global_position.distance_to(global_position) > NOTICE_RANGE * 1.5:
+			or _target.global_position.distance_to(global_position) > MonsterKit.sight(NOTICE_RANGE) * 1.5:
 		_target = _notice()
 		if _target != null:
 			MonsterKit.tell(_target, &"remote_warn", ["一大群發條鼠衝過來了！（丟東西或跳一下嚇牠們）", 0.1])
@@ -189,7 +189,7 @@ func _think(delta: float) -> void:
 
 func _notice() -> Player:
 	var best: Player = null
-	var best_distance := NOTICE_RANGE
+	var best_distance := MonsterKit.sight(NOTICE_RANGE)
 	for player in MonsterKit.active_players(get_tree()):
 		var distance := player.global_position.distance_to(global_position)
 		if distance < best_distance and absf(player.global_position.y - global_position.y) < 2.0 \
@@ -208,7 +208,7 @@ func _loose_loot() -> LootItem:
 	var best_distance := LOOT_RANGE
 	for node in run.loot_root.get_children():
 		var item := node as LootItem
-		if item == null or item.freeze or item.is_queued_for_deletion():
+		if item == null or item.freeze or item.is_queued_for_deletion() or item.carry != null:
 			continue
 		var distance := item.global_position.distance_to(global_position)
 		if distance < best_distance and absf(item.global_position.y - global_position.y) < 2.0:

@@ -614,6 +614,7 @@ func _finish() -> void:
 				if _inside(room, point, 1.4) and map.is_clear(point):
 					map.patrol_points.append(point)
 					break
+	_add_bulky_spots()
 	var spots := 0
 	for room in rooms:
 		spots += room.get("loot", 0)
@@ -632,6 +633,19 @@ func _inside(room: Dictionary, pos: Vector3, margin: float) -> bool:
 func place_trap(kind: String, pos: Vector3, yaw := 0.0, params := {}) -> void:
 	if _traps_script != null and _traps_script.KINDS.has(kind):
 		_traps_script.create(kind, map, pos, yaw, rng.randi(), params)
+
+
+## Floor spots for the map's bulky hauls: one try per room away from the core (not in
+## corridors), clear of solid props. Luck grows with depth like loot spots.
+func _add_bulky_spots() -> void:
+	for room in rooms:
+		if room.depth < 1 or room.depth >= 999 or room.shape == "corridor":
+			continue
+		for attempt in 4:
+			var pos := Vector3(rng.randf_range(room.min.x + 1.5, room.max.x - 1.5), origin.y, rng.randf_range(room.min.y + 1.5, room.max.y - 1.5))
+			if _inside(room, pos, 1.4) and map.is_clear(pos, 1.0):
+				map.bulky_spots.append({"pos": pos, "luck": room.depth * LUCK_PER_DEPTH * 1.5})
+				break
 
 
 ## Registers a loot spot in a room (deeper rooms roll luckier).

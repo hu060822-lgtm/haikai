@@ -166,7 +166,7 @@ func _think(delta: float) -> void:
 func _player_below() -> Player:
 	for player in MonsterKit.active_players(get_tree()):
 		var offset := player.global_position - global_position
-		if Vector2(offset.x, offset.z).length() < TRIGGER_RADIUS and offset.y < -0.5 and offset.y > -CEILING_SEARCH \
+		if Vector2(offset.x, offset.z).length() < MonsterKit.sight(TRIGGER_RADIUS) and offset.y < -0.5 and offset.y > -CEILING_SEARCH \
 				and MonsterKit.clear_line(get_world_3d(), global_position + Vector3.DOWN * 0.2, player.head_position(), [get_rid()]):
 			return player
 	return null

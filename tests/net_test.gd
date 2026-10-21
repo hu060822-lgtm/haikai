@@ -22,8 +22,8 @@ func _run() -> void:
 	GameState.save_enabled = false
 	GameState.reset()
 	Run.forced_monsters = ["colossus", "mimic"]
-	Run.director_enabled = false
 	Run.forced_map = "factory"
+	Awakening.frozen = true  # stages are forced below, never set off by stray noise
 	_main = load("res://scenes/main.tscn").instantiate()
 	_main.show_menus = false
 	root.add_child(_main)
@@ -37,10 +37,6 @@ func _run() -> void:
 			await _host()
 		"client":
 			await _client()
-		"guardian-host":
-			await _guardian_host()
-		"guardian-client":
-			await _guardian_client()
 		"pvp-host":
 			await _pvp_host()
 		"pvp-client":
@@ -65,9 +61,19 @@ func _host() -> void:
 		"both players spawn on the host")
 	_main.player.global_position = SAFE_SPOT + Vector3(0, 0, -2)
 	var loot_start := get_nodes_in_group("loot").size()
+	var client_id: int = _remote_player().get_multiplayer_authority()
+	var carried_by_client := func() -> bool:
+		for node in get_nodes_in_group("loot"):
+			if node.carry != null and node.carry.held_by(client_id):
+				return true
+		return false
+	_check(await _wait(carried_by_client), "the host sees the client hauling a bulky item")
+	_check(await _wait(func() -> bool: return not carried_by_client.call()), "the host sees the client put it down")
 	_check(await _wait(func() -> bool: return _main.level.lever.is_pulled), "client pulls the lever")
 	_check(_main.level.extraction_zone.powered, "lever powers the elevator for the host too")
 	_check(_main.colossus.enraged, "client's lever enrages the host's colossus")
+	_main.run.awakening.host_force_stage(1)
+	_check(_main.run.awakening.stage == 1, "the host's ruin wakes up (驚醒)")
 	_check(get_nodes_in_group("loot").size() < loot_start, "client's pickup removed loot on the host")
 	var remote := _remote_player()
 	_check(remote != null and remote.global_position.distance_to(SAFE_SPOT) < 2.0,
@@ -110,6 +116,27 @@ func _client() -> void:
 	_check(await _wait(func() -> bool: return get_nodes_in_group("loot").size() == loot_before - 1),
 		"picked item disappears for the client")
 
+	var haul: LootItem = null
+	for node in get_nodes_in_group("loot"):
+		if node.carry != null:
+			haul = node
+			break
+	_check(haul != null, "bulky hauls replicate to the client")
+	if haul != null:
+		player.global_position = haul.global_position + Vector3(0.0, 0.3 - haul.data.size.y / 2.0, 1.0)
+		player.velocity = Vector3.ZERO
+		await _frames(40)
+		player.grab_bulky(haul)
+		_check(await _wait(func() -> bool: return player.held_bulky == haul), "client lifts a bulky haul through the host")
+		await _frames(20)
+		_check(haul.global_position.distance_to(player.global_position) < 2.2, "the haul is in the client's hands")
+		_check(player.bulky_factor() < 1.0, "the haul slows the client")
+		player.release_bulky()
+		_check(await _wait(func() -> bool: return not haul.carry.is_held()), "client puts the haul down")
+		player.global_position = SAFE_SPOT
+		player.velocity = Vector3.ZERO
+		await _frames(30)
+
 	var mimic: Mimic = null
 	for node in _main.run.monsters_root.get_children():
 		if node is Mimic:
@@ -124,6 +151,8 @@ func _client() -> void:
 	_check(await _wait(func() -> bool: return _main.level.extraction_zone.powered), "client's lever powers the elevator")
 	await _frames(60)
 	_check(_main.colossus.enraged, "colossus rage replicates to the client")
+	_check(await _wait(func() -> bool: return _main.run.awakening.stage == 1 and _main.run.awakening.level >= 34.0),
+		"the awakening's stage and level reach the client")
 	player.global_position = SAFE_SPOT
 	await _frames(30)
 	player.die("test")
@@ -131,59 +160,6 @@ func _client() -> void:
 	_check(await _wait(func() -> bool: return get_nodes_in_group("loot").size() >= loot_before),
 		"dead client's backpack spills onto the floor")
 	_check(await _wait(func() -> bool: return _ended), "client sees the run end")
-
-
-## The host plays the guardian; one client scavenges.
-func _guardian_host() -> void:
-	print("guardian host")
-	_main.session.local_name = "守墓者"
-	_check(_main.session.host(PORT) == OK, "host opens a room")
-	_check(await _wait(func() -> bool: return _main.session.roster.size() == 2), "client joins the lobby")
-	_main.session.request_role("guardian")
-	_check(_main.session.guardian_id() == 1, "the host takes the guardian role")
-	await _frames(10)
-	_main.session.begin_run()
-	_check(await _wait(func() -> bool: return _main.guardian_view != null and _main.run.all_players().size() == 1),
-		"the guardian gets the machine room and only the scavenger spawns")
-	_check(_main.run.director == null, "no AI director when a person is the guardian")
-	_check(_main.player == null, "the guardian has no body in the factory")
-	var field: FieldControl = _main.run.field
-	field.energy = 100.0
-	_main.run.request_ability("gate", [1])
-	_check(_main.level.gates[1].closed, "the guardian closes a gate")
-	_main.run.request_ability("power")
-	_check(not _main.level.power_on, "the guardian cuts the power")
-	_check(await _wait(func() -> bool: return _main.guardian_view.energy < 50.0), "the guardian's screen shows its energy")
-	var energy_before := field.energy
-	_check(await _wait(func() -> bool: return field.energy > energy_before + 2.0), "the scavenger's noise feeds the guardian")
-	_check(await _wait(func() -> bool: return _ended), "the run ends when the scavenger is done")
-	_check(_summary.get("guardian_won", false), "nothing got out, so the guardian wins")
-	_check(GameState.money == GameState.START_MONEY + GameState.GUARDIAN_WIN_REWARD, "the guardian is paid ($%d)" % GameState.money)
-
-
-func _guardian_client() -> void:
-	print("guardian client")
-	_main.session.local_name = "客人"
-	var joined := false
-	for attempt in 20:
-		if _main.session.join("127.0.0.1", PORT) == OK:
-			if await _wait(func() -> bool: return _main.session.roster.size() == 2, 120):
-				joined = true
-				break
-		await _frames(30)
-	_check(joined, "client connects to the host")
-	_check(await _wait(func() -> bool: return _main.player != null), "the scavenger spawns")
-	_check(_main.session.guardian_id() == 1, "the client knows who the guardian is")
-	_check(_main.run.all_players().size() == 1, "the guardian isn't in the factory")
-	_check(await _wait(func() -> bool: return _main.level.gates[1].closed), "the guardian's gate closes for the scavenger")
-	_check(await _wait(func() -> bool: return not _main.level.power_on), "the blackout reaches the scavenger")
-	for i in 6:
-		GameNoise.emit(self, _main.player.global_position, 14.0, GameNoise.Kind.FOOTSTEP)
-		await _frames(10)
-	await _frames(60)
-	_main.player.die("test")
-	_check(await _wait(func() -> bool: return _ended), "the scavenger sees the run end")
-	_check(_summary.get("guardian_won", false) and _summary.get("guardian", "") == "守墓者", "the result names the winning guardian")
 
 
 ## Two squads: the client joins the blue squad, they start apart, and the host shoots them.

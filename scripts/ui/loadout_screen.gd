@@ -384,6 +384,11 @@ func _build_bottom(page: VBoxContainer) -> void:
 	back.add_theme_font_size_override("font_size", 15)
 	back.custom_minimum_size = Vector2(96, 44)
 	bar.add_child(back)
+	var book := UiKit.button("怪物圖鑑", func() -> void: open_bestiary())
+	book.add_theme_font_size_override("font_size", 15)
+	book.add_theme_color_override("font_color", Bestiary.ORGAN)
+	book.custom_minimum_size = Vector2(96, 44)
+	bar.add_child(book)
 	bar.add_child(UiKit.label("名字", 15, UiKit.DIM))
 	_name_edit = UiKit.line_edit(Session.instance.local_name if Session.instance else "拾荒者", 16)
 	_name_edit.custom_minimum_size = Vector2(120, 40)
@@ -467,6 +472,10 @@ func equip_plan() -> bool:
 		show_status("")
 		return true
 	var cost := plan_cost()
+	var lacking := missing_organs()
+	if not lacking.is_empty():
+		show_status("缺器官：%s（要從怪物身上取得）" % "、".join(lacking.map(func(id: String) -> String: return Arsenal.name_of(id))))
+		return false
 	if not GameState.equip_build(plan):
 		show_status("錢不夠：裝備這把還差 $%d" % (cost - GameState.money))
 		return false
@@ -582,7 +591,32 @@ func shot_state(state: String) -> void:
 
 # --- Bench logic --------------------------------------------------------------------------
 
-## Each piece of the plan: [id, "equipped" | "stash" | "buy"].
+## Organs the plan uses that you don't have (they only come out of monsters).
+func missing_organs() -> Array[String]:
+	var result: Array[String] = []
+	for item: Array in _plan_pieces():
+		if item[1] == "missing":
+			result.append(item[0])
+	return result
+
+
+## Opens the 怪物圖鑑 over the bench.
+func open_bestiary() -> Bestiary:
+	close_picker()
+	var book := Bestiary.new()
+	book.name = "Bestiary"
+	add_child(book)
+	return book
+
+
+## For the screenshot tool: scroll the open bestiary (0 top, 1 bottom).
+func bestiary_scroll(fraction: float) -> void:
+	var book := get_node_or_null("Bestiary") as Bestiary
+	if book != null:
+		book.scroll_to(fraction)
+
+
+## Each piece of the plan: [id, "equipped" | "stash" | "buy" | "missing" (an organ you lack)].
 func _plan_pieces() -> Array:
 	var available := {}
 	var on_gun := {}
@@ -595,7 +629,9 @@ func _plan_pieces() -> Array:
 			result.append([id, "equipped"])
 			continue
 		available[id] = available.get(id, 0) + 1
-		if Arsenal.price_of(id) == 0 or available[id] <= GameState.owned(id):
+		if Arsenal.is_organ(id):
+			result.append([id, "stash" if available[id] <= GameState.owned(id) else "missing"])
+		elif Arsenal.price_of(id) == 0 or available[id] <= GameState.owned(id):
 			result.append([id, "stash"])
 		else:
 			result.append([id, "buy"])
@@ -784,6 +820,9 @@ func _fill_plans() -> void:
 		var missing := _missing_cost(build)
 		var tag := "全部都有" if missing == 0 else "缺 $%d" % missing
 		var color := UiKit.GOOD if missing == 0 else (UiKit.WARN if missing <= GameState.money else UiKit.DANGER)
+		if not _missing_pieces(build, "missing").is_empty():
+			tag = "缺器官"
+			color = UiKit.DANGER
 		var line := "%s\n%s +%d 件" % [saved.name, Arsenal.name_of(build.frame), build.parts.size()]
 		var row := _row_button(line, tag, color, func() -> void: load_plan(index), 50)
 		if Arsenal.clean(build) == Arsenal.clean(plan):
@@ -873,8 +912,11 @@ func _refresh_slots() -> void:
 			tag.add_theme_color_override("font_color", UiKit.DIM)
 		else:
 			part_label.text = Arsenal.name_of(part_id)
-			part_label.add_theme_color_override("font_color", UiKit.TEXT)
+			part_label.add_theme_color_override("font_color", Bestiary.ORGAN if Arsenal.is_organ(part_id) else UiKit.TEXT)
 			match pieces.get(part_id, "stash"):
+				"missing":
+					tag.text = "沒有"
+					tag.add_theme_color_override("font_color", UiKit.DANGER)
 				"buy":
 					tag.text = "$%d" % Arsenal.price_of(part_id)
 					tag.add_theme_color_override("font_color", UiKit.WARN)
@@ -925,15 +967,24 @@ func _fill_picker() -> void:
 		var label_text := "（拆掉，留空）" if id == "" else Arsenal.name_of(id)
 		if id == current:
 			label_text = "✓ " + label_text
-		var name_label := UiKit.label(label_text, 16, UiKit.ACCENT if id == current else UiKit.TEXT)
+		var organ := id != "" and Arsenal.is_organ(id)
+		var name_label := UiKit.label(label_text, 16, UiKit.ACCENT if id == current else (Bestiary.ORGAN if organ else UiKit.TEXT))
 		name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		if organ:
+			var badge := UiKit.sticker("器官", Bestiary.ORGAN_BACK, Bestiary.ORGAN, 12, 0.0)
+			badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			badge.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			top.add_child(badge)
 		top.add_child(name_label)
 		if id != "":
 			var have := _have(id)
 			var tag_text := "擁有 %d" % have if have > 0 else "$%d" % Arsenal.price_of(id)
 			var tag_color := UiKit.GOOD if have > 0 else (UiKit.WARN if Arsenal.price_of(id) <= GameState.money else UiKit.DANGER)
+			if organ and have <= 0:
+				tag_text = "要從怪物身上取得"
+				tag_color = UiKit.DANGER
 			var tag := UiKit.label(tag_text, 14, tag_color)
 			tag.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			top.add_child(tag)
@@ -993,9 +1044,12 @@ func _refresh_cost() -> void:
 	var lines := []
 	var owned_names := []
 	var buy_names := []
+	var lacking := []
 	for item: Array in pieces:
 		var id: String = item[0]
-		if item[1] == "buy":
+		if item[1] == "missing":
+			lacking.append(Arsenal.name_of(id))
+		elif item[1] == "buy":
 			buy_names.append("%s [color=#%s]$%d[/color]" % [Arsenal.name_of(id), UiKit.WARN.to_html(false), Arsenal.price_of(id)])
 		else:
 			owned_names.append(Arsenal.name_of(id))
@@ -1003,8 +1057,16 @@ func _refresh_cost() -> void:
 		lines.append("[color=#%s]已有：[/color]%s" % [UiKit.GOOD.to_html(false), "、".join(owned_names)])
 	if not buy_names.is_empty():
 		lines.append("[color=#%s]要買：[/color]%s" % [UiKit.WARN.to_html(false), "、".join(buy_names)])
+	if not lacking.is_empty():
+		lines.append("[color=#%s]缺器官（買不到，要從怪物身上取得）：[/color]%s" % [UiKit.DANGER.to_html(false), "、".join(lacking)])
 	_cost_detail.text = "\n".join(lines)
-	if _is_equipped_plan():
+	if not lacking.is_empty() and not _is_equipped_plan():
+		_equip.disabled = false
+		_cost_title.text = "缺 %d 個器官，裝不起來" % lacking.size()
+		_cost_title.add_theme_color_override("font_color", UiKit.DANGER)
+		_equip.text = "缺器官"
+		UiKit.style_button(_equip, "locked")
+	elif _is_equipped_plan():
 		_cost_title.text = "這把就是目前裝備的槍"
 		_cost_title.add_theme_color_override("font_color", UiKit.GOOD)
 		_equip.text = "✓ 已裝備"
@@ -1109,7 +1171,16 @@ static func _effect_names(effects: Dictionary) -> Array[String]:
 			"armor": names.append("穿甲（大怪痛）")
 			"leech": names.append("吸血 %d%%" % roundi(v * 100.0))
 			"ghost": names.append("每 %d 發免彈" % v)
-			"bounty": names.append("殺怪掉寶")
+			"bounty": names.append("殺怪掉寶" if not v is float or v <= 1.0 else "殺怪掉好寶")
+			"scream": names.append("命中處尖叫引怪")
+			"hush": names.append("幾乎無聲")
+			"acid": names.append("酸液水窪")
+			"lullaby": names.append("搖籃曲安撫")
+			"web": names.append("黏網")
+			"motion_sight": names.append("看穿牆後動靜")
+			"squeal": names.append("瞄準時尖叫")
+			"guard": names.append("瞄準時傷害 −%d%%" % roundi(v * 100.0))
+			"fang": names.append("獸牙（近戰×3）")
 			_: names.append(effect)
 	return names
 
@@ -1122,12 +1193,12 @@ func _missing_cost(build: Dictionary) -> int:
 
 
 ## The pieces of a build you would have to buy to equip it.
-func _missing_pieces(build: Dictionary) -> Array[String]:
+func _missing_pieces(build: Dictionary, state := "buy") -> Array[String]:
 	var saved_plan := plan
 	plan = Arsenal.clean(build)
 	var result: Array[String] = []
 	for item: Array in _plan_pieces():
-		if item[1] == "buy":
+		if item[1] == state:
 			result.append(item[0])
 	plan = saved_plan
 	return result
@@ -1142,6 +1213,8 @@ func _plan_summary(build: Dictionary) -> String:
 	var missing := []
 	for id: String in _missing_pieces(build):
 		missing.append("%s $%d" % [Arsenal.name_of(id), Arsenal.price_of(id)])
+	for id: String in _missing_pieces(build, "missing"):
+		missing.append("%s（器官，買不到）" % Arsenal.name_of(id))
 	text += "\n" + ("零件全部都有，點一下載入。" if missing.is_empty() else "缺：" + "、".join(missing) + "（點一下載入）")
 	return text
 

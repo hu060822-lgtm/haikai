@@ -169,7 +169,7 @@ func _roam(delta: float) -> void:
 			_roam_goal = random_patrol_point()
 		steer(_roam_goal, TROT_SPEED, delta)
 		for player in MonsterKit.active_players(get_tree()):
-			if sees(player, 0.8, SIGHT):
+			if sees(player, 0.8, MonsterKit.sight(SIGHT)):
 				_mark(player)
 				return
 	else:
@@ -189,7 +189,7 @@ func _side() -> float:
 func _hunt(delta: float) -> void:
 	_hunt_time += delta
 	if _target == null or not is_instance_valid(_target) or not _target.is_active() or _hunt_time > GIVE_UP \
-			or global_position.distance_to(_target.global_position) > SIGHT * 2.0:
+			or global_position.distance_to(_target.global_position) > MonsterKit.sight(SIGHT) * 2.0:
 		_target = null
 		state = State.ROAM
 		return

@@ -1,13 +1,13 @@
 class_name GameMap
 extends Node3D
 ## Shared shape of every map: where players and monsters start, the objective switch
-## that powers the exit, the exit itself, lockers, gates the guardian can close, the
+## that powers the exit, the exit itself, lockers, gates that can slam shut, the
 ## lights a blackout kills, and the spots loot can appear. Maps are built in code.
 ## Subclasses fill in the fields and build their geometry in build().
 
 signal objective_done()
 
-## Render layer for roofs: the guardian's top-down camera leaves them out.
+## Render layer for roofs: top-down tool cameras (tools/layout_shot.gd) leave them out.
 const ROOF_RENDER_LAYER := 1 << 9
 
 ## Tests turn the random wings off to keep runs small and fast (see RoomGrid).
@@ -20,7 +20,7 @@ var objective_text := ""
 var exit_text := ""
 var objective_message := ""
 var blocked_message := ""
-## What the exit is called on the guardian's map, the two-minute warning, and how the
+## What the exit is called, the two-minute warning, and how the
 ## clock kills anyone still inside.
 var exit_name := "出口"
 var warning_message := "只剩兩分鐘了！"
@@ -45,16 +45,20 @@ var traps: Array[Node3D] = []
 var bright := false
 ## This run's item pool (LootTable.make_pool), set by the host before loot is rolled.
 var loot_pool: Array = []
-## Where the guardian may release monsters: x/z half extents and a height range.
+## Floor spots for bulky hauls ({pos, luck}; RoomGrid adds them) and which map's hauls
+## are likelier here (factory, mall, subway, dream; set from the wing's style).
+var bulky_spots: Array = []
+var loot_theme := ""
+## The map's extent: x/z half extents and a height range.
 var bounds := AABB(Vector3(-16, -0.5, -22), Vector3(32, 7.5, 44))
-## The guardian's top-down camera sits this high: just under the roof.
+## Just under the roof: how tall a top-down view (or a watcher's neck) can go.
 var overview_height := 11.5
 
 var extraction_zone: ExtractionZone
 var lever: BoilerLever
 var lockers: Array[Locker] = []
 var gates: Array[Gate] = []
-## The exit needs the objective done AND the power on (the guardian can cut it).
+## The exit needs the objective done AND the power on.
 var objective_on := false
 var power_on := true
 var rng := RandomNumberGenerator.new()
@@ -136,6 +140,31 @@ func roll_loot() -> Array:
 	for i in mini(rng.randi_range(loot_count.x, loot_count.y), spots.size()):
 		var luck: float = loot_luck.get(spots[i], 0.0)
 		result.append({"item": LootTable.roll(rng, luck, loot_pool), "pos": spots[i], "rot": rng.randf_range(0.0, TAU)})
+	result.append_array(roll_bulky())
+	return result
+
+
+## The bulky hauls (LootTable.roll_bulky): LootTable.BULKY_COUNT of them on floor spots,
+## deeper rooms holding the more valuable ones. Wing rooms register bulky_spots; a map
+## without wings falls back to points beside its patrol route.
+func roll_bulky() -> Array:
+	var spots: Array = bulky_spots.duplicate()
+	if spots.is_empty():
+		for point in patrol_points:
+			var at := point + Vector3(1.2, 0.0, 0.9)
+			if extraction_zone == null or at.distance_to(extraction_zone.global_position if extraction_zone.is_inside_tree() else extraction_zone.position) > 4.0:
+				spots.append({"pos": at, "luck": 0.0})
+	for i in range(spots.size() - 1, 0, -1):
+		var j := rng.randi_range(0, i)
+		var tmp = spots[i]
+		spots[i] = spots[j]
+		spots[j] = tmp
+	var result := []
+	for i in mini(rng.randi_range(LootTable.BULKY_COUNT.x, LootTable.BULKY_COUNT.y), spots.size()):
+		var spot: Dictionary = spots[i]
+		var item := LootTable.roll_bulky(rng, spot.luck, loot_theme)
+		var size: Vector3 = item.size
+		result.append({"item": item, "pos": spot.pos + Vector3.UP * (size.y / 2.0 + 0.02), "rot": rng.randf_range(0.0, TAU)})
 	return result
 
 
@@ -237,7 +266,7 @@ func _wall_piece(from: Vector3, dir: Vector3, a: float, b: float, y0: float, y1:
 	_box(size, center, texture, Vector3.ZERO, layer, tint, density)
 
 
-## A roof the guardian's overview camera can see through.
+## A roof top-down cameras can see through.
 func _roof(size: Vector3, pos: Vector3, texture: String, tint := Color.WHITE) -> Node3D:
 	var node := _box(size, pos, texture, Vector3.ZERO, Layers.WORLD, tint)
 	node.get_child(0).layers = ROOF_RENDER_LAYER
@@ -397,6 +426,7 @@ func _plan_sprawl(style: String, core: Rect2, port_specs: Array, theme: Dictiona
 	var grid := RoomGrid.new()
 	grid.name = style
 	grid.style = style
+	loot_theme = style
 	grid.origin = Vector3(core.position.x, 0, core.position.y)
 	grid.blocked.assign([core])
 	grid.limit = core.grow(reach)

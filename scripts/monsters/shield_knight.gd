@@ -157,12 +157,13 @@ func _patrol(delta: float) -> void:
 func _in_view(player: Player) -> bool:
 	var to := player.global_position - global_position
 	to.y = 0.0
-	return to.length() < SIGHT and forward().dot(to.normalized()) > -0.2 and sees(player, 2.6, SIGHT)
+	var sight := MonsterKit.sight(SIGHT)
+	return to.length() < sight and forward().dot(to.normalized()) > -0.2 and sees(player, 2.6, sight)
 
 
 func _advance(delta: float) -> void:
 	if _target == null or not is_instance_valid(_target) or not _target.is_active() \
-			or global_position.distance_to(_target.global_position) > SIGHT * 1.5:
+			or global_position.distance_to(_target.global_position) > MonsterKit.sight(SIGHT) * 1.5:
 		_target = null
 		state = State.PATROL
 		return

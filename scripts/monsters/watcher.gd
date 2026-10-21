@@ -89,7 +89,7 @@ func can_see(player: Player) -> bool:
 		return false
 	var head := head_position()
 	var chest := player.global_position + Vector3.UP * 1.0
-	if head.distance_to(chest) > SIGHT_RANGE or is_covered(player):
+	if head.distance_to(chest) > MonsterKit.sight(SIGHT_RANGE) or is_covered(player):
 		return false
 	return MonsterKit.clear_line(get_world_3d(), head, chest, [get_rid()])
 

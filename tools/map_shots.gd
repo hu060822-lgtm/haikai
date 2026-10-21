@@ -1,5 +1,5 @@
 extends SceneTree
-## Renders a few views of the newer maps, plus the guardian's overview of each.
+## Renders a few views of the newer maps.
 ## Run (needs a display): godot --path . --script res://tools/map_shots.gd -- <out_dir> [map]
 
 const SHOTS := {
@@ -42,7 +42,6 @@ func _run() -> void:
 	GameState.save_enabled = false
 	GameState.reset()
 	Run.forced_monsters = ["colossus"]
-	Run.director_enabled = false
 	# Optional second argument: only this map.
 	var only: String = args[1] if args.size() > 1 else ""
 	for id in SHOTS:
@@ -120,14 +119,6 @@ func _run() -> void:
 		for i in 40:
 			await process_frame
 		_save(out_dir, id + "_powered")
-		main.hud.visible = false
-		var view := GuardianView.new()
-		view.run = main.run
-		view.pixel_scale = main._container.stretch_shrink
-		main.add_child(view)
-		for i in 10:
-			await process_frame
-		_save(out_dir, id + "_guardian")
 		main.queue_free()
 		for i in 5:
 			await process_frame

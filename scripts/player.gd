@@ -68,9 +68,25 @@ const CURSE_INTERVAL := 18.0
 const THAW_TIME := 90.0
 const WALKMAN_TIME := 12.0
 const MUSIC_INTERVAL := 1.5
+# Bulky hauls (LootTable tag "bulky", see BulkyCarry): held in both hands.
+const BULKY_GRAB_TIME := 0.6
+## Each of two carriers feels this share of the weight (the exoskeleton takes off more).
+const CO_CARRY_SHARE := 0.35
+const EXO_BULKY_SHARE := 0.6
+## A hit at least this hard knocks it out of your hands.
+const BULKY_DROP_DAMAGE := 15.0
 const FAKE_RADIO := ["快來這邊…", "我找到出口了，跟著我的聲音。", "你身後…不，沒事。", "別相信其他人。"]
 
 var items: Array[Dictionary] = []
+## The bulky item in this player's hands (set on every peer by BulkyCarry), or null.
+var held_bulky: LootItem = null:
+	set(value):
+		if held_bulky == value:
+			return
+		held_bulky = value
+		_on_held_changed()
+var _grab_hold := 0.0
+var _sway_time := 0.0
 var carried_weight := 0.0
 var carried_value := 0
 var health := MAX_HEALTH
@@ -163,6 +179,9 @@ var _body_gun: Node3D
 var _body_muzzle := Vector3(0, 0.08, -0.6)
 var _thermal := false
 var _thermal_timer := 0.0
+var _squeal_timer := 0.0
+var _motion_timer := 0.0
+var _motion_seen := {}  # monsters the watcher's eye is showing right now
 var _shot_rng := RandomNumberGenerator.new()
 var _bitten := 0.0
 var _hot_timer := HOT_INTERVAL
@@ -640,7 +659,7 @@ func equip(loadout: Dictionary) -> void:
 func remaining_gear() -> Array[String]:
 	var ids: Array[String] = []
 	for id in Arsenal.ids(build):
-		if Arsenal.price_of(id) > 0:
+		if Arsenal.price_of(id) > 0 or Arsenal.is_organ(id):
 			ids.append(id)
 	ids.append_array(boosts)
 	return ids
@@ -654,7 +673,9 @@ func has_gear(id: String) -> bool:
 func look(relative: Vector2) -> void:
 	if not input_enabled or is_dead:
 		return
-	rotate_y(-relative.x * MOUSE_SENSITIVITY)
+	# Something heavy in your arms turns you slowly.
+	var turn := 1.0 - clampf(bulky_load() / 180.0, 0.0, 0.6)
+	rotate_y(-relative.x * MOUSE_SENSITIVITY * turn)
 	_head.rotation.x = clampf(_head.rotation.x - relative.y * MOUSE_SENSITIVITY, deg_to_rad(-85.0), deg_to_rad(85.0))
 
 
@@ -669,9 +690,14 @@ func head_position() -> Vector3:
 func take_damage(amount: float, cause: String) -> void:
 	if is_dead:
 		return
+	if aiming and weapon.get("effects", {}).has("guard"):
+		amount *= 1.0 - float(weapon.effects.guard)  # the knight's door, held up in front
 	health = maxf(health - amount, 0.0)
 	health_changed.emit(health / MAX_HEALTH)
 	add_shake(0.4)
+	if amount >= BULKY_DROP_DAMAGE and held_bulky != null and health > 0.0:
+		message.emit("被打得鬆手了！%s掉在地上。" % held_bulky.item_name)
+		release_bulky()
 	if health <= 0.0:
 		die(cause)
 
@@ -682,6 +708,7 @@ func die(cause: String) -> void:
 	if "second_life" in boosts and not _rewind.is_empty():
 		_rewind_time()
 		return
+	release_bulky()
 	is_dead = true
 	health = 0.0
 	health_changed.emit(0.0)
@@ -717,7 +744,8 @@ func _physics_process(delta: float) -> void:
 	elif is_crouching and _can_stand():
 		_set_crouch(false)
 
-	if input_enabled and Input.is_action_just_pressed("jump") and is_on_floor() and not is_crouching and snared <= 0.0:
+	if input_enabled and Input.is_action_just_pressed("jump") and is_on_floor() and not is_crouching and snared <= 0.0 \
+			and held_bulky == null:
 		var jump := JUMP_VELOCITY * _weight_factor()
 		if has_gear("spring_boots"):
 			jump *= SPRING_JUMP_MULT
@@ -729,7 +757,7 @@ func _physics_process(delta: float) -> void:
 	var direction := (transform.basis * Vector3(input_dir.x, 0.0, input_dir.y)).normalized()
 
 	var sprinting := input_enabled and Input.is_action_pressed("sprint") and not is_crouching \
-		and input_dir.length() > 0.1 and not _exhausted and _crash <= 0.0
+		and input_dir.length() > 0.1 and not _exhausted and _crash <= 0.0 and held_bulky == null
 	_update_stamina(sprinting, delta)
 
 	var speed := WALK_SPEED
@@ -742,6 +770,7 @@ func _physics_process(delta: float) -> void:
 	if _heavy_slowed():
 		speed *= HEAVY_FACTOR
 	speed *= _weight_factor()
+	speed *= bulky_factor()
 	if aiming:
 		speed *= AIM_WALK
 	if trap_slow > 0.0:
@@ -775,13 +804,20 @@ func _physics_process(delta: float) -> void:
 
 	if not input_enabled:
 		return
-	if Input.is_action_just_pressed("interact") and is_instance_valid(_focused):
-		_focused.interact(self)
-		_focused = null
+	if held_bulky != null and not is_instance_valid(held_bulky):
+		held_bulky = null
+	if held_bulky != null and (Input.is_action_just_pressed("interact") or Input.is_action_just_pressed("drop")):
+		release_bulky()
+		_grab_hold = -1.0  # don't start grabbing it again until E is let go
+	else:
+		_update_grab(delta)
+		if Input.is_action_just_pressed("interact") and is_instance_valid(_focused):
+			_focused.interact(self)
+			_focused = null
+		if Input.is_action_just_pressed("drop"):
+			drop_last()
 	if Input.is_action_just_pressed("lantern"):
 		set_lantern(not lantern_on)
-	if Input.is_action_just_pressed("drop"):
-		drop_last()
 	if Input.is_action_just_pressed("use_boost"):
 		use_boost()
 	if Input.is_action_just_pressed("use_item"):
@@ -817,12 +853,107 @@ func drop_last() -> void:
 		item.linear_velocity = velocity_out
 
 
-## Empties the backpack and returns what was in it (used by extraction).
+## Empties the backpack and returns what was in it (used by extraction), plus the bulky
+## item in your hands and any bulky item set down (not held) inside the extraction pad.
 func take_all_items() -> Array[Dictionary]:
 	var taken: Array[Dictionary] = items.duplicate()
+	for haul in bulky_to_extract():
+		taken.append(haul.to_data())
+		haul.carry.request_claim()
+	held_bulky = null
 	items.clear()
 	_recalculate()
 	return taken
+
+
+# --- Bulky hauls -----------------------------------------------------------------------
+
+## Hold E on a bulky item to lift it (or to take the other end from a teammate).
+func _update_grab(delta: float) -> void:
+	if not Input.is_action_pressed("interact"):
+		_grab_hold = 0.0
+		return
+	var target := _focused as LootItem
+	if target == null or target.carry == null or held_bulky != null or _grab_hold < 0.0:
+		return
+	_grab_hold += delta
+	if _grab_hold >= BULKY_GRAB_TIME:
+		_grab_hold = -1.0
+		grab_bulky(target)
+
+
+## Ask the host to put this bulky item in our hands.
+func grab_bulky(target: LootItem) -> void:
+	if target == null or target.carry == null or held_bulky != null or not is_active():
+		return
+	target.carry.request_grab()
+
+
+## Let go of the bulky item: it drops in front of you (with a bang).
+func release_bulky() -> void:
+	if held_bulky == null:
+		return
+	if is_instance_valid(held_bulky) and held_bulky.carry != null and is_inside_tree():
+		held_bulky.carry.request_release(velocity * 0.5)
+	held_bulky = null
+
+
+## How many kilograms of bulky haul this player feels in their arms right now.
+func bulky_load() -> float:
+	if held_bulky == null or not is_instance_valid(held_bulky):
+		return 0.0
+	var felt := held_bulky.weight
+	if held_bulky.carry != null and held_bulky.carry.holders.size() >= 2:
+		felt *= CO_CARRY_SHARE
+	if has_gear("exoskeleton"):
+		felt *= EXO_BULKY_SHARE
+	return felt
+
+
+## Walking speed multiplier from the bulky haul (1 with empty hands).
+func bulky_factor() -> float:
+	if held_bulky == null:
+		return 1.0
+	return 1.0 - clampf(0.12 + bulky_load() / 150.0, 0.0, 0.72)
+
+
+## Bulky items this player takes out when extracting: the one in hand, and any left
+## lying (not held by anyone) on the extraction pad.
+func bulky_to_extract() -> Array[LootItem]:
+	var result: Array[LootItem] = []
+	if held_bulky != null and is_instance_valid(held_bulky) and not held_bulky.is_queued_for_deletion():
+		result.append(held_bulky)
+	var zone: ExtractionZone = null
+	if Run.instance != null and Run.instance.level != null:
+		zone = Run.instance.level.extraction_zone
+	if zone == null or not zone.is_inside_tree():
+		return result
+	for node in get_tree().get_nodes_in_group("loot"):
+		var haul := node as LootItem
+		if haul == null or haul.carry == null or haul.carry.is_held() or haul in result or haul.is_queued_for_deletion():
+			continue
+		var local := zone.to_local(haul.global_position).abs()
+		if local.x < zone.size.x / 2.0 + 0.3 and local.z < zone.size.z / 2.0 + 0.3 and local.y < zone.size.y / 2.0 + 0.5:
+			result.append(haul)
+	return result
+
+
+func _on_held_changed() -> void:
+	_grab_hold = -1.0 if held_bulky != null else _grab_hold
+	if _view != null:
+		_view.visible = is_multiplayer_authority() and held_bulky == null
+	if _body_gun != null:
+		_body_gun.visible = held_bulky == null
+	if not is_multiplayer_authority() or not is_inside_tree():
+		return
+	if held_bulky != null:
+		aiming = false
+		charge = 0.0
+		var share := " 有人幫你抬，輕多了。" if held_bulky.carry != null and held_bulky.carry.holders.size() >= 2 else ""
+		message.emit("搬起了%s（%.0fkg）。不能開槍、不能跑。E 放下。%s" % [held_bulky.item_name, held_bulky.weight, share])
+		if held_bulky.data.has("note") and (held_bulky.carry == null or held_bulky.carry.holders.size() < 2):
+			message.emit(held_bulky.data.note)
+	_recalculate()
 
 
 ## Whether monsters see this player as lit: lantern on, or on a map with no shadows.
@@ -917,7 +1048,8 @@ func melee() -> bool:
 		_focused.pry(self)
 		return true
 	if Run.instance != null:
-		Run.instance.request_melee(_camera.global_position, -_camera.global_basis.z, weapon.get("effects", {}).has("bayonet"))
+		Run.instance.request_melee(_camera.global_position, -_camera.global_basis.z, weapon.get("effects", {}).has("bayonet"),
+				weapon.get("effects", {}).has("fang"))
 	return true
 
 
@@ -956,7 +1088,7 @@ func _update_weapon(delta: float) -> void:
 		if reloading <= 0.0:
 			reloading = 0.0
 			_finish_reload()
-	var can_act := input_enabled and not is_dead
+	var can_act := input_enabled and not is_dead and held_bulky == null
 	aiming = can_act and reloading <= 0.0 and (force_aim or Input.is_action_pressed("aim"))
 	var held := can_act and (hold_trigger or Input.is_action_pressed("use_weapon"))
 	var pressed := held and not _trigger_was_held
@@ -985,6 +1117,7 @@ func _update_weapon(delta: float) -> void:
 	if _view != null:
 		_view.aiming = aiming
 	_update_thermal(delta)
+	_update_organ_sight(delta)
 
 
 ## A thermal sight shows every monster through walls (and the invisible ones) while aiming.
@@ -1005,6 +1138,47 @@ func _update_thermal(delta: float) -> void:
 				instance.material_overlay = overlay
 			elif not want and instance.material_overlay == overlay:
 				instance.material_overlay = null
+
+
+## Organ sights. The watcher's eye shows, while aiming, every monster that is moving
+## (through walls); the drift eye's lens squeals while you aim it, and things hear that.
+func _update_organ_sight(delta: float) -> void:
+	var effects: Dictionary = weapon.get("effects", {})
+	if aiming and effects.has("squeal"):
+		_squeal_timer -= delta
+		if _squeal_timer <= 0.0:
+			_squeal_timer = 1.6
+			GameNoise.emit(get_tree(), global_position, 16.0, GameNoise.Kind.VOICE)
+			Sfx.play_3d(get_parent(), global_position, "screech", -14.0, 18.0, 2.4)
+	var want: bool = aiming and effects.has("motion_sight")
+	if not want and _motion_seen.is_empty():
+		return
+	_motion_timer -= delta
+	if want and _motion_timer > 0.0:
+		return
+	_motion_timer = 0.2
+	var overlay := ShotFx.glow(Color(1.0, 0.95, 0.3, 0.6), false, true)
+	var seen := {}
+	if want:
+		for monster in get_tree().get_nodes_in_group("monsters"):
+			if not monster is Node3D:
+				continue
+			var at: Vector3 = (monster as Node3D).global_position
+			var last: Vector3 = monster.get_meta("eye_last", at)
+			monster.set_meta("eye_last", at)
+			if at.distance_to(last) > 0.08 and at.distance_to(global_position) < 60.0:
+				seen[monster] = true
+	for monster in _motion_seen.keys() + seen.keys():
+		if not is_instance_valid(monster):
+			continue
+		var show: bool = seen.has(monster)
+		for mesh in monster.find_children("*", "MeshInstance3D", true, false):
+			var instance := mesh as MeshInstance3D
+			if show and instance.material_overlay == null:
+				instance.material_overlay = overlay
+			elif not show and instance.material_overlay == overlay:
+				instance.material_overlay = null
+	_motion_seen = seen
 
 
 ## Remote copies: the gun in the left hand, rebuilt when the replicated build changes.
@@ -1158,6 +1332,13 @@ func _recalculate() -> void:
 		for tag in item.get("tags", []):
 			if not tag in tags:
 				tags.append(tag)
+	# What's in your arms counts for monsters (a noisy crate, a cursed statue) but not
+	# for the backpack's weight.
+	if held_bulky != null and is_instance_valid(held_bulky):
+		ids.append(held_bulky.data.id)
+		for tag in held_bulky.data.get("tags", []):
+			if not tag in tags:
+				tags.append(tag)
 	carried_ids = ids
 	carried_tags = tags
 	if _candle_on and usable_index("candle") < 0:
@@ -1220,6 +1401,12 @@ func _update_head(delta: float, moving: bool, speed: float) -> void:
 	_camera.position = Vector3(randf_range(-1, 1), randf_range(-1, 1), 0.0) * _shake * 0.08
 	# Recoil kicks the view up; it settles back as the gun recovers.
 	_camera.rotation.x = deg_to_rad(_recoil)
+	# A heavy haul sways the view side to side with every step, and a little when still.
+	var heft := clampf(bulky_load() / 90.0, 0.0, 1.0)
+	_sway_time += delta * (1.0 + speed * 1.1)
+	var sway := sin(_sway_time * 1.3) * heft
+	_camera.rotation.z = lerpf(_camera.rotation.z, deg_to_rad(sway * 4.5), minf(6.0 * delta, 1.0))
+	_camera.position += Vector3(sway * 0.05, -heft * 0.06 + absf(sway) * -0.03, 0.0)
 	var zoom: float = weapon.get("zoom", 1.0) if aiming else 1.0
 	_camera.fov = lerpf(_camera.fov, BASE_FOV / maxf(zoom, 1.0), minf(14.0 * delta, 1.0))
 
