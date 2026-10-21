@@ -34,6 +34,10 @@ const STAMINA_DRAIN := 0.25
 const STAMINA_REGEN := 0.15
 const STAMINA_RECOVER_THRESHOLD := 0.3
 const SAFE_FALL_SPEED := 9.0
+## How far below the map's bounds you have to fall before you are pulled back, and how
+## often the last safe spot is remembered.
+const FALL_OUT_DEPTH := 6.0
+const SAFE_SPOT_EVERY := 0.5
 const FALL_DAMAGE_PER_SPEED := 15.0
 const FRAGILE_FALL_LOSS := 0.25
 # Footstep noise radius (metres) by gait.
@@ -210,6 +214,9 @@ var _noisy_timer := 0.0
 var _ladders := 0
 var _was_on_floor := true
 var _fall_speed := 0.0
+## Last spot you stood on solid floor (see _catch_falling_out).
+var _safe_spot := Vector3.INF
+var _safe_spot_timer := 0.0
 var _shake := 0.0
 var _adrenaline := 0.0
 var _crash := 0.0
@@ -1556,6 +1563,25 @@ func _handle_landing() -> void:
 	if on_floor or _ladders > 0:
 		_fall_speed = 0.0
 	_was_on_floor = on_floor
+	_catch_falling_out(on_floor)
+
+
+## A safety net under the map: if a crack in the level ever lets you through, you are
+## put back on the last floor you stood on instead of falling forever or dying.
+func _catch_falling_out(on_floor: bool) -> void:
+	if not is_multiplayer_authority() or Run.instance == null or Run.instance.level == null:
+		return
+	if on_floor and get_floor_normal().y > 0.7:
+		_safe_spot_timer -= get_physics_process_delta_time()
+		if _safe_spot_timer <= 0.0:
+			_safe_spot_timer = SAFE_SPOT_EVERY
+			_safe_spot = global_position
+	var bottom: float = Run.instance.level.bounds.position.y - FALL_OUT_DEPTH
+	if global_position.y < bottom and _safe_spot != Vector3.INF:
+		global_position = _safe_spot + Vector3.UP * 0.3
+		velocity = Vector3.ZERO
+		_fall_speed = 0.0
+		message.emit("你差點掉出這個世界……被拉回來了。")
 
 
 func _damage_fragile_items() -> void:

@@ -61,6 +61,8 @@ var kits: Array = []
 var rooms: Array = []
 var doors: Array = []
 var _owner := {}  # Vector2i cell -> room id
+## Ports that ended up with no room behind them: _build_ports bricks their doorways up.
+var sealed_ports: Array[int] = []
 var _gates := 0
 var _traps_script: GDScript = null
 
@@ -168,6 +170,43 @@ func _grow() -> void:
 		for exit in _exits(room):
 			exit.depth = entry.depth + 1
 			frontier.append(exit)
+	_claim_orphan_ports()
+
+
+## A port whose cells another room grew over gets its doorway on that room (the core's
+## wall already has the opening cut, so it must lead somewhere); one with no room at all
+## is bricked up.
+func _claim_orphan_ports() -> void:
+	var served := {}
+	for room in rooms:
+		for door in room.doors:
+			if door.kind == "port":
+				served[door.port] = true
+	for i in ports.size():
+		if served.has(i):
+			continue
+		var port: Dictionary = ports[i]
+		var dir: Vector2i = port.dir
+		var p: Vector3 = port.pos
+		var c := _cell_of(p.x + dir.x * 0.05, p.z + dir.y * 0.05)
+		var steps := 0
+		while not _owner.has(c) and steps < 4:
+			c += dir
+			steps += 1
+		if _owner.has(c) and _covers_doorway(rooms[_owner[c]], port):
+			rooms[_owner[c]].doors.append({"rooms": [_owner[c]], "kind": "port", "pos": p, "size": DOOR_WIDE, "port": i})
+		else:
+			sealed_ports.append(i)
+
+
+## Does this room's wall facing the port run the whole width of the port's doorway?
+func _covers_doorway(room: Dictionary, port: Dictionary) -> bool:
+	var dir: Vector2i = port.dir
+	var p: Vector3 = port.pos
+	var half := DOOR_WIDE.x / 2.0 + 0.3
+	if dir.x != 0:
+		return room.min.y <= p.z - half and room.max.y >= p.z + half
+	return room.min.x <= p.x - half and room.max.x >= p.x + half
 
 
 func _try_room(entry: Dictionary) -> Dictionary:
@@ -565,6 +604,12 @@ func _place_port_doors() -> void:
 
 ## A short passage from each port in the core's wall to the room behind it.
 func _build_ports() -> void:
+	for i in sealed_ports:
+		var port: Dictionary = ports[i]
+		var dir: Vector2i = port.dir
+		var plug := Vector3(0.4, DOOR_WIDE.y + 0.4, DOOR_WIDE.x + 0.6) if dir.x != 0 else Vector3(DOOR_WIDE.x + 0.6, DOOR_WIDE.y + 0.4, 0.4)
+		map._box(plug, port.pos + Vector3(dir.x, 0, dir.y) * 0.2 + Vector3(0, plug.y / 2.0 - 0.2, 0), theme.get("wall", "brick"),
+			Vector3.ZERO, Layers.WORLD, theme.get("wall_tint", Color.WHITE))
 	for room in rooms:
 		for door in room.doors:
 			if door.kind != "port" or door.gap < 0.05:
