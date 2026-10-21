@@ -15,6 +15,7 @@ const BINDINGS := {
 	"use_boost": [KEY_Q],
 	"use_item": [KEY_X],
 	"reload": [KEY_R],
+	"fire_mode": [KEY_B],
 	"melee": [KEY_V],
 	"toggle_mic": [KEY_M],
 	"inventory": [KEY_TAB],

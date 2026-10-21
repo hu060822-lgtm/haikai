@@ -39,6 +39,7 @@ func _run() -> void:
 	_failures += await load("res://tests/monster_a_tests.gd").new().run(self)
 	_failures += await load("res://tests/organ_tests.gd").new().run(self)
 	_failures += await load("res://tests/bag_tests.gd").new().run(self)
+	_failures += await load("res://tests/weapon_tests.gd").new().run(self)
 	await _test_items()
 	await _test_bulky()
 	await _test_gear()
@@ -784,30 +785,70 @@ func _test_arsenal() -> void:
 			frames_ok = false
 			print("    bad frame ", frame_id, " ", s)
 	_check(frames_ok, "all %d frames have sane stats" % Arsenal.FRAMES.size())
+	# Every slot a frame can have, opened by the parts that open it; every part the bench
+	# offers there goes in and changes the numbers sanely.
 	var parts_ok := true
 	var fitted := 0
+	var used := {}
 	for frame_id in Arsenal.FRAMES:
-		for part_id in Arsenal.PARTS:
-			var slot: String = Arsenal.PARTS[part_id].slot
-			var s := Arsenal.stats({"frame": frame_id, "parts": {slot: part_id}})
-			if Arsenal.fits(frame_id, part_id) != (s.parts.get(slot, "") == part_id):
+		for slot in Arsenal.possible_slots(frame_id):
+			var base := _open_slot(frame_id, slot)
+			if not slot in Arsenal.open_slots(base):
 				parts_ok = false
-				print("    part mismatch ", frame_id, " ", part_id)
-			if Arsenal.fits(frame_id, part_id):
+				print("    slot never opens ", frame_id, " ", slot)
+				continue
+			for part_id in Arsenal.parts_for(base, slot):
+				var build: Dictionary = base.duplicate(true)
+				build.parts[slot] = part_id
+				var s := Arsenal.stats(build)
+				if s.parts.get(slot, "") != part_id or not Arsenal.fits(frame_id, part_id):
+					parts_ok = false
+					print("    part mismatch ", frame_id, " ", slot, " ", part_id)
 				fitted += 1
-				for stat in ["damage", "rate", "spread", "range", "noise", "recoil", "reload", "zoom", "weight"]:
+				used[part_id] = true
+				for stat in ["damage", "rate", "spread", "range", "noise", "recoil", "reload", "zoom", "weight", "aim_time",
+						"sway", "aim_spread", "jam", "falloff", "recovery"]:
 					if not is_finite(float(s[stat])) or float(s[stat]) < 0.0:
 						parts_ok = false
 						print("    bad stat ", frame_id, " ", part_id, " ", stat)
+				if s.modes.is_empty() or not s.modes[0] in Arsenal.MODE_NAMES:
+					parts_ok = false
+					print("    bad modes ", frame_id, " ", part_id, " ", s.modes)
 	_check(parts_ok, "every part changes stats sanely and only fits where it should (%d fits)" % fitted)
-	var used := {}
-	for frame_id in Arsenal.FRAMES:
-		for part_id in Arsenal.PARTS:
-			if Arsenal.fits(frame_id, part_id):
-				used[part_id] = true
-	_check(used.size() == Arsenal.PARTS.size(), "every part fits at least one frame")
+	_check(used.size() == Arsenal.PARTS.size(), "every part fits at least one frame (%d of %d)" % [used.size(), Arsenal.PARTS.size()])
+	_check("flashlight" in Arsenal.parts_for("smg", "rail_l") and not "flashlight" in Arsenal.parts_for("smg", "underbarrel"),
+		"lights and lasers go on the rails, not under the barrel")
 	var quiet := Arsenal.stats({"frame": "smg", "parts": {"muzzle": "suppressor"}})
 	_check(quiet.noise < Arsenal.FRAMES.smg.noise, "a suppressor lowers the noise")
+
+
+## A bare build of this frame with whatever parts it takes to open the slot (a handguard
+## for the rails, a flash hider for a quick-detach can, a threaded barrel for a muzzle).
+func _open_slot(frame_id: String, slot: String) -> Dictionary:
+	var build := {"frame": frame_id, "parts": {}}
+	# Slot types whose parts open the slot (a part opening one of those leads there too).
+	var leads := {}
+	for id in Arsenal.PARTS:
+		if slot in Arsenal.part(id).get("adds", []) and Arsenal.fits(frame_id, id):
+			leads[Arsenal.part(id).slot] = true
+	for depth in 3:
+		if slot in Arsenal.open_slots(build):
+			return build
+		var opened := false
+		for opener in Arsenal.SLOTS:
+			if build.parts.has(opener):
+				continue
+			for part_id in Arsenal.parts_for(build, opener):
+				var adds: Array = Arsenal.part(part_id).get("adds", [])
+				if slot in adds or adds.any(func(added: String) -> bool: return leads.has(Arsenal.slot_type(added))):
+					build.parts[opener] = part_id
+					opened = true
+					break
+			if opened:
+				break
+		if not opened:
+			break
+	return build
 
 
 ## Guns against monsters: the starter revolver and knife, reloading, a large monster
