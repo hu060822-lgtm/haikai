@@ -937,7 +937,7 @@ static func frame_stat(frame_id: String, stat: String) -> Variant:
 static func fits(frame_id: String, part_id: String) -> bool:
 	var f := frame(frame_id)
 	var p := part(part_id)
-	if f.is_empty() or p.is_empty():
+	if f.is_empty() or p.is_empty() or not _frame_ok(frame_id, p):
 		return false
 	return _tags_fit(frame_id, _frame_calibers(frame_id), p)
 
