@@ -17,6 +17,7 @@ const BINDINGS := {
 	"reload": [KEY_R],
 	"melee": [KEY_V],
 	"toggle_mic": [KEY_M],
+	"inventory": [KEY_TAB],
 }
 
 const MOUSE_BINDINGS := {

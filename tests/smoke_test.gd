@@ -38,6 +38,7 @@ func _run() -> void:
 	_failures += await load("res://tests/monster_b_tests.gd").new().run(self)
 	_failures += await load("res://tests/monster_a_tests.gd").new().run(self)
 	_failures += await load("res://tests/organ_tests.gd").new().run(self)
+	_failures += await load("res://tests/bag_tests.gd").new().run(self)
 	await _test_items()
 	await _test_bulky()
 	await _test_gear()
@@ -734,7 +735,7 @@ func _test_gear() -> void:
 	player.get_node("Head").rotation.x = 0.0
 	await _frames(5)
 
-	_check(player.can_carry({"weight": 40.0}) and Player.max_carry(player) == 45.0, "the exoskeleton carries 15kg more")
+	_check(Player.full_load(player) == Player.EXO_FULL_LOAD and Player.EXO_FULL_LOAD > Player.FULL_LOAD, "the exoskeleton makes backpack weight slow you less")
 	Input.action_press("crouch")
 	await _frames(5)
 	Input.action_release("crouch")
@@ -1516,12 +1517,23 @@ func _test_afternoon(main: Node, dream: EndlessAfternoon, player: Player) -> voi
 	dream.clarity = 20.0
 	await _frames(2)
 	_check(player.dream > 0.5, "afternoon: the dream thickens as clarity falls")
+	# A roomy 24-cell bag: this checks the halving, not how a random bag packs (tests/bag_tests.gd does).
+	player.bag_cells.assign(_roomy_bag())
 	for id in [1, 2, 3, 4]:
 		player.pickup(LootTable.make(id))
 	dream.clarity = 0.0
 	await _frames(5)
 	_check(main.run.finished and main.last_result.get("survived", false) and main.last_result.items.size() == 2,
 		"afternoon: at zero you're woken up with half your loot (%d items)" % main.last_result.get("items", []).size())
+
+
+## A 6x4 bag (the usual 24 cells) that fits any two items, for tests that aren't about packing.
+func _roomy_bag() -> Array[Vector2i]:
+	var cells: Array[Vector2i] = []
+	for y in 4:
+		for x in 6:
+			cells.append(Vector2i(x, y))
+	return cells
 
 
 func _new_run(loadout := {}) -> Node:
@@ -1559,6 +1571,8 @@ func _test_player_basics() -> void:
 	var item: LootItem = loot.filter(func(node: LootItem) -> bool: return not LootTable.has_tag(node.data, "heavy"))[0]
 	var value := item.value
 	var item_data := item.to_data()
+	# The bait below is a second copy of a random item (up to 3x3): give a bag both always fit in.
+	player.bag_cells.assign(_roomy_bag())
 	item.interact(player)
 	await _frames(2)
 	_check(player.items.size() == 1 and player.carried_value == value, "item is picked up")

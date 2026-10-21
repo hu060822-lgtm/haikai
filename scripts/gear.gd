@@ -24,7 +24,7 @@ const ITEMS := {
 	},
 	"exoskeleton": {
 		"name": "外骨骼背架", "slot": "boost", "price": 300, "weight": 3.0,
-		"desc": "負重上限 +15kg，一個人就能搬重物。代價是不能蹲下。",
+		"desc": "背著東西走得快：背包重量拖慢你的程度少三分之一，一個人就能搬重物。代價是不能蹲下。",
 	},
 	"heart_detector": {
 		"name": "心跳偵測器", "slot": "boost", "price": 220, "weight": 0.5,

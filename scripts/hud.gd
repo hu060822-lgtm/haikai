@@ -13,7 +13,7 @@ const CONTROLS := [
 	["WASD", "移動"], ["滑鼠", "看"], ["Shift", "衝刺"], ["Ctrl", "蹲下"],
 	["空白", "跳"], ["E", "撿起／互動"], ["G", "丟下"], ["F", "提燈"],
 	["左鍵", "開槍"], ["右鍵", "瞄準"], ["R", "換彈"], ["V", "小刀"],
-	["Q", "強化"], ["X", "用物品"], ["M", "麥克風"],
+	["Q", "強化"], ["X", "用物品"], ["Tab", "背包"], ["M", "麥克風"],
 ]
 const HIT_TIME := 0.28
 
@@ -37,6 +37,10 @@ var _prompt_detail: Label
 var _prompt_row: HBoxContainer
 var _inventory: Label
 var _weight_bar: ProgressBar
+var _pack_panel: PanelContainer
+var _pack_flash := 0.0
+## The backpack grid screen (Tab).
+var bag: BagScreen
 ## What's in your arms when hauling a bulky item (name, weight, value, how to put it down).
 var _haul_panel: PanelContainer
 var _haul: Label
@@ -94,6 +98,8 @@ func _ready() -> void:
 	_build_bottom_right()
 	_build_help()
 	_ignore_mouse(_root)
+	bag = BagScreen.new()
+	add_child(bag)
 
 
 # --- Layout ---------------------------------------------------------------------------
@@ -258,13 +264,19 @@ func _build_bottom_left() -> void:
 	stack.add_child(_haul_panel)
 
 	var pack := _panel(Color(1.0, 1.0, 1.0, 0.25))
+	_pack_panel = pack
 	pack.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	var pack_box := VBoxContainer.new()
 	pack_box.add_theme_constant_override("separation", 4)
 	pack.add_child(pack_box)
+	var pack_row := HBoxContainer.new()
+	pack_row.add_theme_constant_override("separation", 8)
+	pack_box.add_child(pack_row)
 	_inventory = _text("", 16)
 	_inventory.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	pack_box.add_child(_inventory)
+	pack_row.add_child(_inventory)
+	pack_row.add_child(UiKit.key_chip("Tab", 12))
+	# How full the grid is.
 	_weight_bar = _bar(UiKit.TEXT, Vector2(240.0, 4.0))
 	pack_box.add_child(_weight_bar)
 	stack.add_child(pack)
@@ -381,11 +393,19 @@ func bind_player(player: Player) -> void:
 	player.message.connect(show_message)
 	player.readout_changed.connect(func(text: String) -> void: _readout.text = text)
 	player.hit_confirmed.connect(show_hit)
+	bag.bind(player)
 	_on_inventory_changed(player.items, player.carried_weight, player.carried_value)
 	_on_gear_changed()
 
 
 func show_message(text: String, seconds := 3.0) -> void:
+	var full := text.begins_with(Player.BAG_FULL_MESSAGE)
+	if full:
+		_pack_flash = 1.2
+	# 「包包塞不下」 shouts in red; everything else is the usual bone white.
+	(_toast.get_theme_stylebox("panel") as StyleBoxFlat).border_color = UiKit.DANGER if full else UiKit.TEXT
+	(_toast.get_theme_stylebox("panel") as StyleBoxFlat).border_width_left = 4 if full else 2
+	_message.add_theme_color_override("font_color", Color(1.0, 0.62, 0.55) if full else UiKit.TEXT)
 	_message.text = text
 	_message_timer = seconds
 	_toast.visible = text != ""
@@ -483,6 +503,26 @@ func _process(delta: float) -> void:
 	_help_hint.modulate.a = 0.0 if _help.visible else 0.55
 	_update_weapon(delta)
 	_update_haul()
+	_pack_flash = maxf(_pack_flash - delta, 0.0)
+	var pack_box := _pack_panel.get_theme_stylebox("panel") as StyleBoxFlat
+	pack_box.border_color = UiKit.DANGER if fmod(_pack_flash, 0.3) > 0.15 else Color(1.0, 1.0, 1.0, 0.25)
+	pack_box.border_width_left = 4 if _pack_flash > 0.0 else 2
+
+
+## Tab: open or close the backpack grid. The game doesn't pause.
+func toggle_bag(open: bool) -> void:
+	if open:
+		bag.open()
+	else:
+		bag.close()
+	if _player != null and is_instance_valid(_player):
+		_player.bag_open = open
+	_crosshair.visible = not open
+	_prompt_row.visible = _prompt_row.visible and not open
+
+
+var bag_open: bool:
+	get: return bag != null and bag.visible
 
 
 func _update_haul() -> void:
@@ -594,14 +634,19 @@ func _on_health_changed(ratio: float) -> void:
 
 
 func _on_inventory_changed(items: Array, weight: float, value: int) -> void:
-	var limit := Player.max_carry(_player)
-	_inventory.text = "背包 %d 件　%.1f / %.0f kg　$%d" % [items.size(), weight, limit, value]
+	var cells := _player.bag_cells.size() if _player != null else GridBag.CELLS
+	var used := cells - (GridBag.free_cells(_player.bag_cells, items) if _player != null else cells)
+	_inventory.text = "背包 %d / %d 格　%.1f kg　$%d" % [used, cells, weight, value]
 	var organs := items.filter(func(item: Dictionary) -> bool: return item.has("organ")).size()
 	if organs > 0:
 		_inventory.text += "　器官 %d" % organs
-	var ratio := weight / limit if limit > 0.0 else 0.0
+	var ratio := float(used) / cells if cells > 0 else 0.0
 	_weight_bar.value = ratio
-	_set_bar_color(_weight_bar, UiKit.DANGER if ratio > 0.85 else (UiKit.WARN if ratio > 0.6 else UiKit.TEXT))
+	# Heavier means slower: the bar goes orange, then red, as the weight piles on.
+	var heft := weight / Player.full_load(_player)
+	_set_bar_color(_weight_bar, UiKit.DANGER if heft > 0.85 else (UiKit.WARN if heft > 0.6 else UiKit.TEXT))
+	if bag != null:
+		bag.refresh()
 	_usable = ""
 	for i in range(items.size() - 1, -1, -1):
 		if items[i].has("use"):

@@ -11,6 +11,7 @@ class_name LootTable
 ## instead of the backpack (no gun, no sprint, slow; two players carrying it share the weight;
 ## see LootItem and Player.held_bulky). Bulky items never come out of roll(): maps place them with
 ## roll_bulky(), and "theme" (factory/mall/subway/dream) makes them likelier on that map.
+## Every non-bulky item takes a footprint of cells in the backpack grid (see GridBag).
 ## "use": what pressing X does with it (see Player.use_item). "effect": a passive effect
 ## while carried (see Player). "note": shown when picked up. "pool": false keeps it out of
 ## random rolls (it is obtained some other way).
@@ -271,7 +272,7 @@ static func has_tag(data: Dictionary, tag: String) -> bool:
 static func prompt(data: Dictionary) -> String:
 	if has_tag(data, "bulky"):
 		return "[按住 E] 搬起 %s　$%d　%.0fkg　大件（雙手搬，找隊友一起抬）" % [data.get("name", "?"), data.get("value", 0), data.get("weight", 0.0)]
-	var tags := ""
+	var tags := "　%d 格" % GridBag.footprint(data).size()
 	for tag in data.get("tags", []):
 		if TAG_NAMES.has(tag):
 			tags += "　" + TAG_NAMES[tag]
