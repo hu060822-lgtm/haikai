@@ -327,11 +327,11 @@ func _on_run_ended(summary: Dictionary) -> void:
 	last_summary = summary
 	if not show_menus:
 		return
-	var result := last_result
 	if not session.is_online():
-		await get_tree().create_timer(2.5 if result.get("survived", false) else 3.5).timeout
+		await get_tree().create_timer(2.5 if last_result.get("survived", false) else 3.5).timeout
 	if run == null:
 		return
+	var result := last_result
 	_capture_mouse(false)
 	hud.visible = false
 	var screen := ResultScreen.new()

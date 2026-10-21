@@ -1337,9 +1337,11 @@ func local_extracted() -> void:
 	gear.append_array(haul.organs)
 	local_player.set_extracted()
 	GameState.record_extraction(payout.total, gear)
-	Session.instance.report_finished(payout.total)
+	# Tell this machine first: when you are the last one out, report_finished ends the
+	# run on the spot, and the result screen reads this result.
 	local_finished.emit({"survived": true, "items": payout.items_list, "payout": payout, "cause": "", "lost_gear": [],
 		"organs": haul.organs})
+	Session.instance.report_finished(payout.total)
 
 
 ## The dreamcore map woke this player up: out you go, but half your loot stays in the dream.
@@ -1364,9 +1366,9 @@ func _on_local_died(cause: String) -> void:
 	# Your backpack spills where you fell, for teammates to pick up.
 	_to_host(&"_spill_body", [items, local_player.global_position])
 	GameState.record_death()
-	Session.instance.report_finished()
 	local_finished.emit({"survived": false, "items": items, "payout": {}, "cause": cause,
 		"lost_gear": local_player.remaining_gear()})
+	Session.instance.report_finished()
 
 
 @rpc("any_peer", "call_local", "reliable")

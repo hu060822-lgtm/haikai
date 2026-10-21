@@ -43,6 +43,7 @@ func _run() -> void:
 	_failures += await load("res://tests/weapon_tests.gd").new().run(self)
 	_failures += await load("res://tests/bench_tests.gd").new().run(self)
 	_failures += await load("res://tests/map_tests.gd").new().run(self)
+	_failures += await load("res://tests/result_tests.gd").new().run(self)
 	await _test_items()
 	await _test_bulky()
 	await _test_gear()
