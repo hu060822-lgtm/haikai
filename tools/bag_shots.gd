@@ -1,6 +1,7 @@
 extends SceneTree
 ## Screenshots of the grid backpack: a few random bag shapes packed with loot, hovering an
-## item, dragging (fits / doesn't fit, turned), and the 「包包塞不下」 message.
+## item, dragging (fits / doesn't fit, turned), the 「包包塞不下」 message, the 保險箱
+## (empty, packed, dragging into it) and the death screen with what the 保險箱 saved.
 ## Run (needs a display):
 ##   godot --path . --rendering-driver opengl3 --script res://tools/bag_shots.gd -- <out_dir>
 
@@ -99,6 +100,63 @@ func _run() -> void:
 	main.set_bag_open(true)
 	await _frames(6)
 	_save(out_dir, "full_bag")
+	main.set_bag_open(false)
+	await _frames(2)
+
+	# The 保險箱: empty beside a packed bag, then with things in it, then dragging into it.
+	player.take_all_items()
+	player.bag_cells = GridBag.generate(hash([seeds[1], 1]))
+	for id: int in [1, 17, 63, 12, 5, 44]:
+		player.pickup(LootTable.make(id))
+	main.set_bag_open(true)
+	bag.point_at_box_cell(Vector2(0.5, 0.5))
+	await _frames(6)
+	_save(out_dir, "box_empty")
+	main.set_bag_open(false)
+	player.pickup(LootTable.make(11))
+	player.pickup(Organs.loot_data("hound_fang"))
+	player.box_put(player.items.size() - 1)
+	player.box_put(player.items.size() - 2)
+	main.set_bag_open(true)
+	bag.point_at_box_cell(Vector2(1.5, 0.5))
+	await _frames(6)
+	_save(out_dir, "box_items")
+	player.take_all_items()
+	for id: int in [73, 1, 17, 11, 90]:
+		player.pickup(LootTable.make(id))
+	bag.refresh()
+	bag.point_at_cell(Vector2(GridBag.placed_cells(player.items[3])[0]) + Vector2(0.5, 0.5))
+	bag.begin_drag()
+	bag.point_at_box_cell(Vector2(0.6, 1.45))
+	await _frames(4)
+	_save(out_dir, "box_drag_fits")
+	bag.end_drag()
+	bag.point_at_cell(Vector2(GridBag.placed_cells(player.items[0])[0]) + Vector2(0.5, 0.5))
+	bag.begin_drag()
+	bag.point_at_box_cell(Vector2(0.5, 0.5))
+	await _frames(4)
+	_save(out_dir, "box_drag_blocked")
+	bag._cancel_drag()
+	main.set_bag_open(false)
+	await _frames(2)
+
+	# Dying with the 保險箱 packed: the result screen says what it saved.
+	player.take_all_items()
+	for id: int in [1, 3, 74]:
+		player.pickup(LootTable.make(id))
+	player.pickup(Organs.loot_data("hound_fang"))
+	player.box_put(player.items.size() - 1)
+	for id: int in [90, 11]:
+		player.pickup(LootTable.make(id))
+		player.box_put(player.items.size() - 1)
+	main.show_menus = true
+	player.take_damage(1000.0, "被回收員收走了")
+	for i in 900:
+		await process_frame
+		if not root.find_children("*", "ResultScreen", true, false).is_empty():
+			break
+	await _frames(30)
+	_save(out_dir, "death_box")
 	quit()
 
 

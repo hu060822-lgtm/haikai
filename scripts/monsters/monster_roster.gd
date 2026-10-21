@@ -86,7 +86,8 @@ const MAX_KINDS := 6
 const MAX_LARGE := 2
 
 
-static func pick(rng: RandomNumberGenerator) -> Array[String]:
+## `extra` more kinds than usual on big maps (still at most MAX_LARGE large ones).
+static func pick(rng: RandomNumberGenerator, extra := 0) -> Array[String]:
 	var pool: Array = MONSTERS.keys().filter(func(kind) -> bool: return not MONSTERS[kind].get("spawned_only", false))
 	# Fisher-Yates with the run's rng so every peer could reproduce it.
 	for i in range(pool.size() - 1, 0, -1):
@@ -94,7 +95,7 @@ static func pick(rng: RandomNumberGenerator) -> Array[String]:
 		var swap = pool[i]
 		pool[i] = pool[j]
 		pool[j] = swap
-	var wanted := rng.randi_range(MIN_KINDS, mini(MAX_KINDS, pool.size()))
+	var wanted := mini(rng.randi_range(MIN_KINDS, MAX_KINDS) + extra, pool.size())
 	var result: Array[String] = []
 	var large := 0
 	for kind in pool:

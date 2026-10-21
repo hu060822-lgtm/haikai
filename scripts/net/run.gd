@@ -136,46 +136,79 @@ func _host_populate() -> void:
 	_host_spawn_monsters()
 
 
+## Monsters spread over the whole map: each one (or each pack) takes the patrol point
+## farthest from where the squads start and from every monster placed before it, so
+## nobody runs through half the map without meeting anything. Bigger maps (more rooms)
+## also draw more kinds.
 func _host_spawn_monsters() -> void:
 	monster_kinds.clear()
 	if forced_monsters.is_empty():
-		monster_kinds = MonsterRoster.pick(rng)
+		monster_kinds = MonsterRoster.pick(rng, _extra_kinds())
 	else:
 		monster_kinds.assign(forced_monsters)
 	var spots := level.roll_loot()
+	var taken: Array[Vector3] = []
+	for slot in maxi(1, Session.instance.active_squads().size()):
+		taken.append(squad_start(slot).pos)
 	for kind in monster_kinds:
 		var count_range: Array = MonsterRoster.MONSTERS[kind].count
+		var pack_at := Vector3.INF
 		for i in rng.randi_range(count_range[0], count_range[1]):
 			_monster_serial += 1
 			var serial := _monster_serial
 			var data := {"type": kind, "name": "%s%d" % [kind.capitalize(), serial], "seed": rng.randi()}
-			match kind:
-				"colossus":
-					data.name = "Colossus"
-					data.pos = level.monster_spawn
-				"mannequin":
-					data.pos = _far_patrol_point()
-				"watcher":
-					data.pos = _far_patrol_point()
-				"centipede", "mother":
-					data.pos = _far_patrol_point()
-				"greeter", "collector", "rats", "fog_walker", "tuner", "child":
-					data.pos = level.random_patrol_point() + Vector3.UP * 0.1
-				"mimic":
-					var spot: Dictionary = spots[serial % spots.size()]
-					data.pos = spot.pos
-					data.rot = spot.rot
-					data.disguise = LootTable.roll(rng, 0.8, level.loot_pool)
-				_:
-					# Roster-driven monsters: "spawn" is far (away from players), air or patrol.
-					match MonsterRoster.MONSTERS[kind].get("spawn", "patrol"):
-						"far":
-							data.pos = _far_patrol_point()
-						"air":
-							data.pos = level.random_patrol_point() + Vector3(0, 3.0, 0)
-						_:
-							data.pos = level.random_patrol_point() + Vector3.UP * 0.1
+			if kind == "colossus":
+				data.name = "Colossus"
+				data.pos = level.monster_spawn
+				taken.append(data.pos)
+			elif kind == "mimic":
+				var spot: Dictionary = spots[serial % spots.size()]
+				data.pos = spot.pos
+				data.rot = spot.rot
+				data.disguise = LootTable.roll(rng, 0.8, level.loot_pool)
+			elif kind in PACKS and pack_at != Vector3.INF:
+				# The rest of a pack starts around its first member.
+				data.pos = pack_at + Vector3(rng.randf_range(-1.5, 1.5), 0.0, rng.randf_range(-1.5, 1.5))
+			else:
+				var point := _spread_point(taken)
+				taken.append(point)
+				pack_at = point + Vector3.UP * 0.1
+				data.pos = pack_at
+				if MonsterRoster.MONSTERS[kind].get("spawn", "patrol") == "air":
+					data.pos = point + Vector3(0, 3.0, 0)
 			_monster_spawner.spawn(data)
+
+
+## Kinds that start together as one group.
+const PACKS := ["hounds", "rats"]
+## Rooms in a map's random wings per extra monster kind (over the first EXTRA_KINDS_FROM).
+const ROOMS_PER_EXTRA_KIND := 20
+const EXTRA_KINDS_FROM := 20
+
+
+func _extra_kinds() -> int:
+	var rooms := 0
+	for grid in level.wings:
+		rooms += grid.rooms.size()
+	return clampi((rooms - EXTRA_KINDS_FROM) / ROOMS_PER_EXTRA_KIND + (1 if rooms > EXTRA_KINDS_FROM else 0), 0, 2)
+
+
+## The patrol point farthest from every point in `taken` (squad starts, monsters).
+func _spread_point(taken: Array[Vector3]) -> Vector3:
+	if level.patrol_points.is_empty():
+		return level.monster_spawn
+	var best: Vector3 = level.patrol_points[0]
+	var best_gap := -1.0
+	for point in level.patrol_points:
+		var gap := INF
+		for other in taken:
+			gap = minf(gap, point.distance_to(other))
+		# A little noise so equal gaps don't always pick the same corner.
+		gap += rng.randf() * 2.0
+		if gap > best_gap:
+			best_gap = gap
+			best = point
+	return best
 
 
 ## Host: a gate (shop shutter, a door the tuner slams) closes or rolls back up.
@@ -201,7 +234,6 @@ func host_spawn_monster(kind: String, pos: Vector3) -> void:
 	_monster_spawner.spawn(data)
 
 
-## The patrol point farthest from where players start.
 ## Where each squad starts: the first at the map's own spawn, the others at the patrol
 ## points that are farthest from every squad placed so far, facing the map's centre.
 ## Pure function of the level, so every peer works out the same answer.
@@ -226,14 +258,6 @@ func squad_start(slot: int) -> Dictionary:
 	centre /= level.patrol_points.size()
 	var to := centre - pick
 	return {"pos": pick + Vector3.UP * 0.1, "yaw": atan2(-to.x, -to.z)}
-
-
-func _far_patrol_point() -> Vector3:
-	var best: Vector3 = level.patrol_points[0]
-	for point in level.patrol_points:
-		if point.distance_to(level.player_spawn) > best.distance_to(level.player_spawn):
-			best = point
-	return best + Vector3.UP * 0.1
 
 
 func host_spawn_loot(item: Dictionary, pos: Vector3, rot := 0.0, frozen := true, velocity := Vector3.ZERO) -> LootItem:
@@ -1280,7 +1304,10 @@ func _lucky() -> void:
 	for kind in MonsterRoster.MONSTERS:
 		if MonsterRoster.MONSTERS[kind].size != "large":
 			kinds.append(kind)
-	host_spawn_monster(kinds[rng.randi_range(0, kinds.size() - 1)], _far_patrol_point())
+	var around: Array[Vector3] = []
+	for monster in live_monsters():
+		around.append(monster.global_position)
+	host_spawn_monster(kinds[rng.randi_range(0, kinds.size() - 1)], _spread_point(around) + Vector3.UP * 0.1)
 
 
 @rpc("any_peer", "call_local", "reliable")
@@ -1337,20 +1364,25 @@ func local_extracted() -> void:
 	gear.append_array(haul.organs)
 	local_player.set_extracted()
 	GameState.record_extraction(payout.total, gear)
-	Session.instance.report_finished(payout.total)
+	# Tell this machine first: when you are the last one out, report_finished ends the
+	# run on the spot, and the result screen reads this result.
 	local_finished.emit({"survived": true, "items": payout.items_list, "payout": payout, "cause": "", "lost_gear": [],
 		"organs": haul.organs})
+	Session.instance.report_finished(payout.total)
 
 
-## The dreamcore map woke this player up: out you go, but half your loot stays in the dream.
+## The dreamcore map woke this player up: out you go, but half your loot stays in the dream
+## (the 保險箱 keeps all of its own).
 func local_woken() -> void:
 	if finished or local_player == null:
 		return
 	var kept: Array[Dictionary] = []
-	var items := local_player.items.duplicate()
-	items.shuffle()
-	for i in items.size() / 2:
-		kept.append(items[i])
+	var loose: Array[Dictionary] = []
+	for item in local_player.items:
+		(kept if item.has("box") else loose).append(item)
+	loose.shuffle()
+	for i in loose.size() / 2:
+		kept.append(loose[i])
 	local_player.items.assign(kept)
 	local_player.message.emit("有人把你叫醒了。你手上的東西少了一半。")
 	local_extracted()
@@ -1360,13 +1392,17 @@ func _on_local_died(cause: String) -> void:
 	if finished:
 		return
 	finished = true
+	# The 保險箱 is paid out as if you got out (its organs go to the stash) ...
+	var box := Organs.split(local_player.take_box_items())
+	var saved := LootTable.payout(box.rest, rng) if not box.rest.is_empty() else {}
+	GameState.record_box(saved.get("total", 0), box.organs)
+	# ... and the backpack spills where you fell, for teammates to pick up.
 	var items := local_player.items.duplicate()
-	# Your backpack spills where you fell, for teammates to pick up.
 	_to_host(&"_spill_body", [items, local_player.global_position])
 	GameState.record_death()
-	Session.instance.report_finished()
-	local_finished.emit({"survived": false, "items": items, "payout": {}, "cause": cause,
-		"lost_gear": local_player.remaining_gear()})
+	local_finished.emit({"survived": false, "items": items, "payout": saved, "cause": cause,
+		"lost_gear": local_player.remaining_gear(), "organs": box.organs})
+	Session.instance.report_finished(saved.get("total", 0))
 
 
 @rpc("any_peer", "call_local", "reliable")

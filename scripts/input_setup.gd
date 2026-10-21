@@ -17,7 +17,8 @@ const BINDINGS := {
 	"reload": [KEY_R],
 	"fire_mode": [KEY_B],
 	"melee": [KEY_V],
-	"toggle_mic": [KEY_M],
+	"toggle_mic": [KEY_T],
+	"minimap": [KEY_M],
 	"inventory": [KEY_TAB],
 }
 
