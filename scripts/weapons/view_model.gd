@@ -6,9 +6,9 @@ extends Node3D
 ## The model is drawn small and close (SCALE) so it looks full size but almost never
 ## pokes into walls.
 
-const SCALE := 0.42
-const HIP := Vector3(0.11, -0.12, -0.23)
-const AIM := Vector3(0.0, -0.058, -0.21)
+const SCALE := 0.6
+const HIP := Vector3(0.12, -0.14, -0.27)
+const AIM := Vector3(0.0, -0.083, -0.31)
 
 var aiming := false
 var _rig: Node3D
@@ -27,6 +27,8 @@ var _aim := 0.0
 var _sway := Vector2.ZERO
 var _bob := 0.0
 var _last_basis := Basis.IDENTITY
+## Magnifying sights: at full aim the gun drops out of view so you look down the scope.
+var _scoped := false
 
 
 func _ready() -> void:
@@ -59,6 +61,7 @@ func set_build(build: Dictionary) -> void:
 	if _gun != null:
 		_gun.queue_free()
 	_gun = GunModels.build(build)
+	_scoped = build.get("parts", {}).get("sight", "") in ["scope", "thermal"]
 	_gun.scale = Vector3.ONE * SCALE
 	_rig.add_child(_gun)
 	_no_shadow(_gun)
@@ -147,6 +150,8 @@ func _process(delta: float) -> void:
 		_knife.visible = false
 	_rig.position = pos
 	_rig.rotation = rot
+	if _gun != null:
+		_gun.visible = not (_scoped and _aim > 0.9)
 
 
 static func _ease(t: float) -> float:

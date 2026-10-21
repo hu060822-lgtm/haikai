@@ -1373,9 +1373,25 @@ func _test_player_basics() -> void:
 	# Something light: heavy loot would slow the crawl below.
 	var item: LootItem = loot.filter(func(node: LootItem) -> bool: return not LootTable.has_tag(node.data, "heavy"))[0]
 	var value := item.value
+	var item_data := item.to_data()
 	item.interact(player)
 	await _frames(2)
 	_check(player.items.size() == 1 and player.carried_value == value, "item is picked up")
+	# The "[E] pick up" prompt must clear once the item you looked at is gone.
+	var prompts: Array[String] = []
+	player.prompt_changed.connect(func(text: String) -> void: prompts.append(text))
+	var cam: Camera3D = player.get_viewport().get_camera_3d()
+	var bait: LootItem = Run.instance.host_spawn_loot(item_data, cam.global_position - cam.global_basis.z * 1.0, 0.0, true)
+	await _frames(6)
+	_check(not prompts.is_empty() and prompts[-1] != "", "looking at loot shows the pick-up prompt")
+	Input.action_press("interact")
+	await _frames(2)
+	Input.action_release("interact")
+	await _frames(6)
+	_check(not is_instance_valid(bait) or not bait.is_inside_tree(), "pressing E picks it up")
+	_check(not prompts.is_empty() and prompts[-1] == "", "the pick-up prompt clears after picking up")
+	player.drop_last()
+	await _frames(2)
 
 	# Crawl duct: standing is blocked, crouching fits.
 	player.global_position = Vector3(-5.0, 0.05, 9.0)
