@@ -134,6 +134,7 @@ var _shape: CapsuleShape3D
 var _collider: CollisionShape3D
 var _ceiling_check: ShapeCast3D
 var _focused: Node = null
+var _prompt_text := ""
 var _body: Node3D
 var _remote_last_pos := Vector3.ZERO
 ## How fast this player is moving across the ground, on every peer (monsters that only
@@ -1229,9 +1230,14 @@ func _update_focus() -> void:
 	var hit := _ray.get_collider()
 	if hit != null and hit.has_method("interact"):
 		target = hit
-	if target != _focused or (_focused != null and not is_instance_valid(_focused)):
-		_focused = target
-		prompt_changed.emit(target.get_prompt(self) if target != null else "")
+	_focused = target
+	# Compare the text, not the node: a picked-up item can vanish (freed, or hidden while
+	# the host confirms) without the ray ever reporting a different target, and prompts
+	# like lockers change while you look at them.
+	var text: String = target.get_prompt(self) if target != null else ""
+	if text != _prompt_text:
+		_prompt_text = text
+		prompt_changed.emit(text)
 
 
 # --- Loot that does something --------------------------------------------------------
