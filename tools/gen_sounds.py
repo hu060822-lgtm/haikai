@@ -150,7 +150,7 @@ def flutter():
 
 
 def screech():
-    """The moth's scream after it snuffs a lantern."""
+    """A shrill monster scream."""
     n = int(RATE * 1.4)
     out = []
     for i in range(n):

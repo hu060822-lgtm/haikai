@@ -111,7 +111,7 @@ var gun_code := "":
 	set(value):
 		gun_code = value
 		_show_body_gun()
-## A light bolted under the barrel, on whenever the lantern is (moths fly at either).
+## A light bolted under the barrel, on whenever the lantern is (light-seeking monsters notice either).
 var gun_light_on: bool:
 	get: return lantern_on and gun_code.contains("flashlight")
 var boosts: Array[String] = []
@@ -474,7 +474,7 @@ func remote_push(push: Vector3) -> void:
 	velocity += push
 
 
-## Host -> owner: a moth put the lantern out.
+## Host -> owner: a monster put the lantern out.
 @rpc("any_peer", "call_local", "reliable")
 func remote_snuff() -> void:
 	if not _from_host() or not lantern_on:
