@@ -106,7 +106,7 @@ func web_count() -> int:
 	return count
 
 
-## Host: put a web up (used by the AI; tests and the guardian can call it too).
+## Host: put a web up (used by the AI; tests can call it too).
 func host_add_web(pos: Vector3, yaw: float, width: float) -> void:
 	var p := web_pos.duplicate()
 	var i := web_info.duplicate()

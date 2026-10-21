@@ -1,7 +1,7 @@
 class_name Gate
 extends StaticBody3D
-## A steel shutter over a doorway or duct mouth. The guardian (or the AI director)
-## slams it shut for a while; it rolls back up on its own.
+## A steel shutter over a doorway or duct mouth. The map (mall shutters) or a monster
+## (the tuner) slams it shut for a while; it rolls back up again.
 
 @export var size := Vector3(0.15, 2.2, 1.0)
 

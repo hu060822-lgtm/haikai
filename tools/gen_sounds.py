@@ -7,6 +7,7 @@ import math
 import os
 import random
 import struct
+import sys
 import wave
 
 RATE = 11025
@@ -358,6 +359,26 @@ def horn():
     return [e * 0.9 for e in echo]
 
 
+def awaken():
+    """The ruin waking: a deep building-wide groan that swells and sinks, with a sub thud."""
+    r = random.Random(11)
+    n = int(RATE * 3.2)
+    out = []
+    ph1 = ph2 = 0.0
+    for i in range(n):
+        t = i / RATE
+        f1 = 52 - 14 * (t / 3.2) + 1.5 * math.sin(2 * math.pi * 0.7 * t)
+        f2 = f1 * 1.49 + 0.8 * math.sin(2 * math.pi * 1.3 * t)
+        ph1 += f1 / RATE
+        ph2 += f2 / RATE
+        s = 0.6 * math.sin(2 * math.pi * ph1) + 0.3 * (2 * (ph2 % 1.0) - 1)
+        s += 0.12 * r.uniform(-1, 1)
+        s = math.tanh(s * 2.2) * 0.7  # grinding, overdriven
+        thud = math.sin(2 * math.pi * 38 * t) * math.exp(-t / 0.35) * 0.8
+        out.append(s * env(i, n, 0.35, 0.5) + thud)
+    return lowpass(out, 0.18)
+
+
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
     for name, fn in [("thump", thump), ("hiss", hiss), ("whistle", whistle), ("step", step),
@@ -367,6 +388,10 @@ if __name__ == "__main__":
                      ("chime", chime), ("wind", wind),
                      ("lullaby", lullaby), ("cough", cough), ("rumble", rumble), ("giggle", giggle),
                      ("static", static), ("tune", tune), ("boom", boom), ("zap", zap),
-                     ("bang", bang), ("quack", quack), ("roar", roar), ("horn", horn)]:
+                     ("bang", bang), ("quack", quack), ("roar", roar), ("horn", horn),
+                     ("awaken", awaken)]:
+        # python3 tools/gen_sounds.py awaken  writes just the named sounds.
+        if len(sys.argv) > 1 and name not in sys.argv[1:]:
+            continue
         write(name, fn())
     print("sounds written to", os.path.abspath(OUT))

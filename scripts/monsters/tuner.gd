@@ -242,7 +242,7 @@ func _tick_doors(delta: float) -> void:
 func _spot() -> Player:
 	var eye := global_position + Vector3.UP * 1.7
 	var best: Player = null
-	var best_distance := SIGHT
+	var best_distance := MonsterKit.sight(SIGHT)
 	for player in MonsterKit.active_players(get_tree()):
 		var chest := player.global_position + Vector3.UP
 		var distance := eye.distance_to(chest)

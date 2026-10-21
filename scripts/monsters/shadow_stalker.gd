@@ -121,8 +121,8 @@ func _think(delta: float) -> void:
 		steer(_retreat_goal, SPEED * 1.3, delta)
 		return
 	if _target == null or not is_instance_valid(_target) or not _target.is_active() \
-			or global_position.distance_to(_target.global_position) > HUNT_RANGE:
-		_target = MonsterKit.nearest_player(self, HUNT_RANGE)
+			or global_position.distance_to(_target.global_position) > MonsterKit.sight(HUNT_RANGE):
+		_target = MonsterKit.nearest_player(self, MonsterKit.sight(HUNT_RANGE))
 	if _target == null:
 		if global_position.distance_to(_goal) < 1.5:
 			_goal = random_patrol_point()

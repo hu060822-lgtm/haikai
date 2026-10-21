@@ -316,7 +316,7 @@ func _can_sense(player: Player) -> bool:
 	var distance := to_player.length()
 	if distance < NEAR_SENSE and absf(to_player.y) < KILL_HEIGHT:
 		return true
-	var sight := SIGHT_RANGE_LIT if player.is_lit() else SIGHT_RANGE_DARK
+	var sight := MonsterKit.sight_of(player, SIGHT_RANGE_LIT, SIGHT_RANGE_DARK)
 	if player.is_crouching and not player.is_lit():
 		sight *= 0.6
 	if distance > sight:

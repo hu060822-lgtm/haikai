@@ -127,8 +127,8 @@ static func muzzle_point(build: Dictionary) -> Vector3:
 
 
 ## The PS1 gun material (object-space texturing). Cached.
-static func mat(texture: String, tint := Color.WHITE, glow := Color.BLACK) -> ShaderMaterial:
-	var key := "%s|%s|%s|%s" % [texture, tint, glow, snap]
+static func mat(texture: String, tint := Color.WHITE, glow := Color.BLACK, density := 7.0) -> ShaderMaterial:
+	var key := "%s|%s|%s|%s|%s" % [texture, tint, glow, snap, density]
 	if _mats.has(key):
 		return _mats[key]
 	if _shader == null:
@@ -140,6 +140,7 @@ static func mat(texture: String, tint := Color.WHITE, glow := Color.BLACK) -> Sh
 	m.set_shader_parameter("albedo_color", tint)
 	m.set_shader_parameter("emission_color", glow)
 	m.set_shader_parameter("snap_height", snap)
+	m.set_shader_parameter("texel_density", density)
 	_mats[key] = m
 	return m
 
@@ -762,7 +763,12 @@ static func _ring(centre: Vector3, radius: float, segments: int) -> Array:
 # --- Parts ----------------------------------------------------------------------------
 
 static func _attach_parts(r: Rig) -> void:
-	var p: Dictionary = r.parts
+	var p: Dictionary = r.parts.duplicate()
+	# Organs are grown on, not bolted: each slot's organ is the monster's model, small.
+	for slot in Arsenal.SLOTS:
+		if p.has(slot) and Arsenal.is_organ(p[slot]):
+			_organ_on_gun(r, slot, p[slot])
+			p.erase(slot)
 	if p.get("barrel", "") == "coil_barrel":
 		_coil_barrel(r)
 	if p.has("muzzle"):
@@ -1009,3 +1015,471 @@ static func _gadget(r: Rig, id: String) -> void:
 					Vector2(0.012, 0.01), Vector2(0.0, 0.01)], Vector3.ZERO, mat("brass", Color(1.3, 1.1, 0.6)), 8).transform = \
 					LowPoly.at(c + Vector3(0, -0.002, 0), Vector3(180, 0, 0))
 			_ball(r.root, 0.003, c + Vector3(0, -0.014, 0), mat("panel", DARK))
+
+
+
+# --- Organs ---------------------------------------------------------------------------
+# Every monster's organ is its own gory low-poly lump. Each is drawn in "unit" space (about
+# a metre long, front toward -Z), then fitted to the size asked for: the floor loot is
+# 0.3-1 m, the same model grown onto a gun is a few centimetres.
+
+const FLESH := Color(1.3, 0.66, 0.58)
+const MEAT := Color(1.15, 0.26, 0.22)
+const GORE := Color(0.6, 0.05, 0.05)
+const BILE := Color(0.55, 1.25, 0.25)
+const PALE := Color(1.3, 1.25, 1.18)
+const CHITIN := Color(0.4, 0.33, 0.3)
+const SINEW := Color(1.2, 0.85, 0.7)
+
+## Texture density for the organ being built (keeps texels about the same size at any scale).
+static var _od := 7.0
+
+
+## A finished model of an organ part, centred on the origin, `length` metres on its longest side.
+static func organ(id: String, length := 0.5) -> Node3D:
+	var root := Node3D.new()
+	root.name = "Organ_" + id
+	var body := Node3D.new()
+	root.add_child(body)
+	_od = clampf(7.0 * length, 1.2, 7.0)
+	match id:
+		"colossus_heart": _o_colossus_heart(body)
+		"watcher_eye": _o_watcher_eye(body)
+		"centipede_segment": _o_centipede_segment(body)
+		"mother_musicbox": _o_mother_musicbox(body)
+		"burrower_drill": _o_burrower_drill(body)
+		"knight_door": _o_knight_door(body)
+		"mannequin_arm": _o_mannequin_arm(body)
+		"mimic_shell": _o_mimic_shell(body)
+		"greeter_smile": _o_greeter_smile(body)
+		"collector_sack": _o_collector_sack(body)
+		"rat_spring": _o_rat_spring(body)
+		"fog_lung": _o_fog_lung(body)
+		"tuner_cords": _o_tuner_cords(body)
+		"child_marble": _o_child_marble(body)
+		"spitter_sac": _o_spitter_sac(body)
+		"splitter_core": _o_splitter_core(body)
+		"dropper_arm": _o_dropper_arm(body)
+		"screamer_mask": _o_screamer_mask(body)
+		"hound_fang": _o_hound_fang(body)
+		"weaver_gland": _o_weaver_gland(body)
+		"stalker_shadow": _o_stalker_shadow(body)
+		"eye_lens": _o_eye_lens(body)
+		_: _ball(body, 0.4, Vector3.ZERO, _om("concrete", MEAT), Vector3.ONE, 0.2)
+	var box := AABB()
+	var first := true
+	for child in body.get_children():
+		if child is MeshInstance3D:
+			var mesh_box: AABB = child.transform * (child as MeshInstance3D).get_aabb()
+			box = mesh_box if first else box.merge(mesh_box)
+			first = false
+	var longest := maxf(box.size.x, maxf(box.size.y, box.size.z))
+	var s := length / maxf(longest, 0.001)
+	body.scale = Vector3.ONE * s
+	body.position = -box.get_center() * s
+	root.set_meta("organ", id)
+	return root
+
+
+## An organ material at this organ's texel density.
+static func _om(texture: String, tint := Color.WHITE, glow := Color.BLACK) -> ShaderMaterial:
+	return mat(texture, tint, glow, _od)
+
+
+## A tube that tapers from r0 at the first point to r1 at the last.
+static func _taper(p: Node3D, points: Array, r0: float, r1: float, m: Material, sides := 5) -> MeshInstance3D:
+	var path := PackedVector3Array()
+	var radii := PackedFloat32Array()
+	for i in points.size():
+		path.append(points[i])
+		radii.append(lerpf(r0, r1, float(i) / maxf(points.size() - 1, 1)))
+	return _put(p, LowPoly.tube(path, radii, sides), Vector3.ZERO, m)
+
+
+## Wet red veins wandering over a ball of radius r at c.
+static func _veins(p: Node3D, c: Vector3, r: float, count: int, seed: int, m: Material) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed
+	for i in count:
+		var a := rng.randf_range(0.0, TAU)
+		var b := rng.randf_range(-0.9, 0.9)
+		var points := []
+		for k in 4:
+			var aa := a + k * 0.35
+			var bb := b + rng.randf_range(-0.25, 0.25)
+			points.append(c + Vector3(cos(aa) * cos(bb), sin(bb), sin(aa) * cos(bb)) * r * 1.02)
+		_taper(p, points, r * 0.06, r * 0.02, m, 4)
+
+
+static func _organ_on_gun(r: Rig, slot: String, id: String) -> void:
+	var size := 0.08
+	var at := Vector3.ZERO
+	match slot:
+		"muzzle":
+			size = 0.085
+			at = r.muzzle + Vector3(0, 0, -size * 0.45)
+			_rod(r.root, maxf(r.barrel_r, 0.009) * 1.3, maxf(r.barrel_r, 0.009) * 1.3, 0.02, r.muzzle + Vector3(0, 0, -0.008), mat("panel", DARK), 6)
+			r.muzzle = r.muzzle + Vector3(0, 0, -size * 0.9)
+		"barrel":
+			size = maxf(0.1, r.barrel_start.distance_to(r.muzzle) * 0.6)
+			at = r.barrel_start.lerp(r.muzzle, 0.55)
+		"sight":
+			size = 0.09
+			at = r.top + Vector3(0, 0.04, 0)
+			_box(r.root, Vector3(0.018, 0.008, 0.06), r.top + Vector3(0, 0.004, 0), mat("panel", DARK), Vector3.ZERO, 0.002)
+		"magazine":
+			size = 0.11
+			at = r.mag + Vector3(0, -0.05, 0)
+		"stock":
+			size = 0.19
+			at = r.stock + Vector3(0, -0.025, 0.1)
+		"underbarrel":
+			size = 0.12
+			at = r.under + Vector3(0, -0.018, 0)
+		"ammo":
+			size = 0.055
+			at = r.side + Vector3(signf(r.side.x if r.side.x != 0.0 else 1.0) * 0.03, 0, 0)
+			var m := mat("panel", MEAT, GORE * 0.4)
+			for node in r.rounds:
+				node.material_override = m
+		"gadget":
+			size = 0.045
+			var g := r.gadget
+			var hang := g + Vector3(0.004, -0.04, 0.012)
+			_tube(r.root, [g, g + Vector3(0.002, -0.014, 0.004), g + Vector3(0.0, -0.028, 0.01), hang], 0.0018, mat("brass"), 3)
+			at = hang + Vector3(0, -0.026, 0)
+	var model := organ(id, size)
+	model.position = at
+	# A twist of sinew holds it on: it's grown into the gun.
+	r.root.add_child(model)
+
+
+static func _o_colossus_heart(p: Node3D) -> void:
+	var meat := _om("concrete", MEAT)
+	var dark := _om("concrete", GORE)
+	_ball(p, 0.4, Vector3.ZERO, meat, Vector3(1.0, 1.15, 0.95), 0.16)
+	_ball(p, 0.28, Vector3(0.14, -0.3, 0.05), dark, Vector3(1.0, 1.1, 1.0), 0.22)
+	_ball(p, 0.17, Vector3(0.12, 0.02, -0.33), _om("panel", FIRE, FIRE * 0.9), Vector3(1.0, 1.4, 0.6), 0.2)
+	_ball(p, 0.1, Vector3(-0.3, -0.12, -0.18), _om("panel", FIRE, FIRE * 0.7), Vector3.ONE, 0.25)
+	var brass := _om("brass", COPPER)
+	_taper(p, [Vector3(-0.12, 0.3, 0.0), Vector3(-0.16, 0.52, 0.02), Vector3(-0.08, 0.66, 0.05)], 0.09, 0.07, brass, 7)
+	_taper(p, [Vector3(0.16, 0.28, 0.08), Vector3(0.24, 0.5, 0.12), Vector3(0.36, 0.58, 0.1)], 0.07, 0.06, brass, 7)
+	_rod(p, 0.11, 0.11, 0.04, Vector3(-0.08, 0.68, 0.05), _om("rust_metal", RUST), 8, Vector3.ZERO)
+	_disc_x(p, 0.07, 0.03, Vector3(0.38, 0.58, 0.1), _om("panel", RED), 8)
+	for i in 7:
+		var a := TAU * i / 7.0
+		_box(p, Vector3(0.05, 0.05, 0.05), Vector3(cos(a) * 0.38, 0.12 + sin(a * 2.0) * 0.08, sin(a) * 0.36), _om("rust_metal", DARK), Vector3(0, rad_to_deg(a), 0), 0.01)
+	_veins(p, Vector3.ZERO, 0.4, 6, 3, dark)
+
+
+static func _o_watcher_eye(p: Node3D) -> void:
+	_ball(p, 0.36, Vector3.ZERO, _om("panel", PALE), Vector3.ONE, 0.05)
+	_rod(p, 0.19, 0.19, 0.05, Vector3(0, 0, -0.34), _om("panel", Color(1.1, 0.95, 0.25), Color(0.25, 0.2, 0.0)), 12)
+	_rod(p, 0.085, 0.085, 0.06, Vector3(0, 0, -0.355), _om("panel", BLACK), 10)
+	_ball(p, 0.03, Vector3(0.05, 0.05, -0.39), _om("panel", BONE, Color(0.6, 0.6, 0.6)))
+	_veins(p, Vector3.ZERO, 0.36, 9, 11, _om("panel", RED))
+	var nerve := _om("concrete", MEAT)
+	_taper(p, [Vector3(0, -0.02, 0.3), Vector3(0.06, -0.1, 0.5), Vector3(0.02, -0.22, 0.66), Vector3(-0.06, -0.26, 0.8)], 0.14, 0.08, nerve, 6)
+	_ball(p, 0.09, Vector3(-0.06, -0.26, 0.82), _om("concrete", GORE), Vector3(1, 1, 0.6), 0.3)
+
+
+static func _o_centipede_segment(p: Node3D) -> void:
+	var shell := _om("rust_metal", CHITIN)
+	_rod(p, 0.3, 0.3, 0.6, Vector3.ZERO, shell, 8)
+	for z: float in [-0.24, 0.0, 0.24]:
+		_rod(p, 0.34, 0.33, 0.1, Vector3(0, 0.02, z), _om("rust_metal", Color(0.55, 0.45, 0.38)), 8)
+	_rod(p, 0.27, 0.27, 0.03, Vector3(0, 0, -0.31), _om("concrete", MEAT), 8)
+	_rod(p, 0.27, 0.27, 0.03, Vector3(0, 0, 0.31), _om("concrete", GORE), 8)
+	_ball(p, 0.1, Vector3(0.05, 0.02, -0.32), _om("panel", BONE), Vector3(1, 1, 0.5))
+	var leg := _om("panel", Color(0.3, 0.24, 0.22))
+	for sx: float in [-1.0, 1.0]:
+		for z: float in [-0.2, 0.0, 0.2]:
+			_taper(p, [Vector3(sx * 0.26, -0.12, z), Vector3(sx * 0.48, -0.16, z - 0.03), Vector3(sx * 0.56, -0.38, z - 0.06)], 0.045, 0.015, leg, 4)
+	for i in 4:
+		_box(p, Vector3(0.05, 0.04, 0.05), Vector3(0.1 - i * 0.07, 0.32, -0.1 + i * 0.07), _om("panel", YELLOW, Color(0.3, 0.25, 0.0)), Vector3.ZERO, 0.01)
+
+
+static func _o_mother_musicbox(p: Node3D) -> void:
+	var wood := _om("wood", WOOD)
+	_box(p, Vector3(0.7, 0.32, 0.5), Vector3(0, -0.06, 0), wood, Vector3.ZERO, 0.03)
+	_box(p, Vector3(0.74, 0.04, 0.54), Vector3(0, -0.22, 0), _om("wood", Color(0.8, 0.55, 0.4)), Vector3.ZERO, 0.01)
+	_box(p, Vector3(0.7, 0.05, 0.5), Vector3(0, 0.34, 0.19), wood, Vector3(70, 0, 0), 0.02)
+	_box(p, Vector3(0.6, 0.02, 0.4), Vector3(0, 0.33, 0.17), _om("panel", Color(1.3, 0.6, 0.8)), Vector3(70, 0, 0), 0.0)
+	_ball(p, 0.2, Vector3(0, 0.14, -0.02), _om("concrete", FLESH), Vector3(1.3, 0.8, 1.0), 0.25)
+	_ball(p, 0.12, Vector3(0.12, 0.2, 0.04), _om("concrete", MEAT), Vector3.ONE, 0.25)
+	for i in 6:
+		_box(p, Vector3(0.025, 0.06, 0.02), Vector3(-0.18 + i * 0.03, 0.12, -0.18), _om("panel", BONE), Vector3.ZERO, 0.0)
+	var brass := _om("brass", Color(1.3, 1.1, 0.6))
+	_rod(p, 0.02, 0.02, 0.12, Vector3(0.41, -0.04, 0), brass, 6, Vector3(0, 0, 90))
+	for sz: float in [-1.0, 1.0]:
+		_tube(p, _ring(Vector3.ZERO, 0.05, 8).map(func(v: Vector3) -> Vector3: return Vector3(0.48, -0.04 + v.y, sz * 0.05 + v.x)), 0.015, brass, 4)
+	_box(p, Vector3(0.08, 0.2, 0.01), Vector3(-0.15, -0.1, -0.255), _om("panel", GORE), Vector3(0, 0, 8), 0.0)
+	_box(p, Vector3(0.04, 0.12, 0.01), Vector3(0.1, -0.12, -0.255), _om("panel", GORE), Vector3(0, 0, -5), 0.0)
+
+
+static func _o_burrower_drill(p: Node3D) -> void:
+	_ball(p, 0.26, Vector3(0, 0, 0.3), _om("concrete", FLESH), Vector3(1.1, 0.9, 1.0), 0.2)
+	_ball(p, 0.16, Vector3(0, -0.04, 0.5), _om("concrete", GORE), Vector3(1, 1, 0.5), 0.3)
+	var plate := _om("rust_metal", Color(0.5, 0.48, 0.5))
+	for i in 3:
+		_box(p, Vector3(0.5 - i * 0.06, 0.06, 0.2), Vector3(0, 0.2 - i * 0.02, 0.42 - i * 0.14), plate, Vector3(-18, 0, 0), 0.02)
+	var claw := _om("rust_metal", Color(0.75, 0.72, 0.7))
+	for sx: float in [-1.0, 0.0, 1.0]:
+		_taper(p, [Vector3(sx * 0.14, 0.0, 0.2), Vector3(sx * 0.17, -0.02, -0.1), Vector3(sx * 0.15, -0.1, -0.38), Vector3(sx * 0.1, -0.24, -0.52)],
+				0.08, 0.005, claw, 5)
+	_bone_bits(p, Vector3(0, -0.12, 0.3), 3, 7)
+
+
+static func _o_knight_door(p: Node3D) -> void:
+	var iron := _om("rust_metal", RUST)
+	_box(p, Vector3(0.68, 1.0, 0.07), Vector3.ZERO, iron, Vector3.ZERO, 0.02)
+	for y: float in [-0.25, 0.25]:
+		_box(p, Vector3(0.52, 0.38, 0.02), Vector3(0, y, -0.04), _om("rust_metal", Color(0.9, 0.75, 0.65)), Vector3.ZERO, 0.01)
+	_rod(p, 0.03, 0.03, 0.12, Vector3(0.24, 0.0, -0.08), _om("panel", DARK), 6, Vector3(0, 0, 90))
+	for i in 5:
+		_ball(p, 0.04, Vector3(-0.2 + i * 0.1, 0.3 - (i % 2) * 0.45, -0.05), _om("panel", BLACK), Vector3(1, 1, 0.3))
+	_box(p, Vector3(0.14, 0.16, 0.01), Vector3(-0.12, 0.05, -0.052), _om("panel", GORE), Vector3(0, 0, 15), 0.0)
+	for i in 4:
+		_box(p, Vector3(0.025, 0.08, 0.01), Vector3(-0.17 + i * 0.03, 0.15, -0.052), _om("panel", GORE), Vector3(0, 0, 10 - i * 6), 0.0)
+	var strap := _om("panel", Color(0.45, 0.3, 0.2))
+	for y: float in [-0.2, 0.2]:
+		_box(p, Vector3(0.6, 0.06, 0.03), Vector3(0, y, 0.05), strap, Vector3.ZERO, 0.005)
+	_taper(p, [Vector3(0, -0.15, 0.08), Vector3(0.0, 0.05, 0.16), Vector3(0.05, 0.25, 0.14)], 0.09, 0.07, _om("concrete", FLESH), 6)
+	_ball(p, 0.1, Vector3(0.05, 0.27, 0.14), _om("concrete", GORE), Vector3(1, 0.7, 1), 0.3)
+	_rod(p, 0.025, 0.025, 0.06, Vector3(0.05, 0.33, 0.14), _om("panel", BONE), 6, Vector3.ZERO)
+
+
+static func _o_mannequin_arm(p: Node3D) -> void:
+	var plastic := _om("panel", Color(1.25, 1.12, 1.0))
+	_taper(p, [Vector3(0, 0, 0.45), Vector3(0, 0, 0.06)], 0.075, 0.065, plastic, 7)
+	_ball(p, 0.08, Vector3(0, 0, 0.0), _om("panel", Color(0.9, 0.85, 0.8)))
+	_taper(p, [Vector3(0, 0, -0.05), Vector3(0, -0.03, -0.36)], 0.06, 0.045, plastic, 7)
+	_ball(p, 0.05, Vector3(0, -0.035, -0.39), _om("panel", Color(0.9, 0.85, 0.8)))
+	_box(p, Vector3(0.13, 0.04, 0.13), Vector3(0, -0.04, -0.48), plastic, Vector3(0, 0, 0), 0.015)
+	for i in 4:
+		_taper(p, [Vector3(-0.045 + i * 0.03, -0.04, -0.54), Vector3(-0.05 + i * 0.033, -0.05, -0.62), Vector3(-0.05 + i * 0.034, -0.09, -0.66)], 0.014, 0.01, plastic, 4)
+	_taper(p, [Vector3(0.07, -0.04, -0.47), Vector3(0.11, -0.05, -0.53)], 0.016, 0.012, plastic, 4)
+	_ball(p, 0.085, Vector3(0, 0, 0.48), _om("concrete", GORE), Vector3(1, 1, 0.5), 0.35)
+	_taper(p, [Vector3(0.02, 0.02, 0.5), Vector3(0.06, 0.05, 0.6), Vector3(0.1, -0.02, 0.66)], 0.012, 0.008, _om("panel", RED), 4)
+	_taper(p, [Vector3(-0.03, 0.0, 0.5), Vector3(-0.07, -0.04, 0.58), Vector3(-0.05, -0.1, 0.64)], 0.01, 0.008, _om("panel", YELLOW), 4)
+	_box(p, Vector3(0.02, 0.16, 0.002), Vector3(0.0, 0.0, 0.3), _om("panel", BLACK), Vector3(0, 90, 0), 0.0)
+
+
+static func _o_mimic_shell(p: Node3D) -> void:
+	_ball(p, 0.4, Vector3.ZERO, _om("panel", Color(0.36, 0.26, 0.4)), Vector3(0.85, 0.42, 1.1), 0.1)
+	for i in 5:
+		_box(p, Vector3(0.62 - absf(i - 2) * 0.08, 0.02, 0.025), Vector3(0, 0.16 - absf(i - 2) * 0.025, -0.3 + i * 0.15), _om("panel", Color(0.2, 0.15, 0.22)), Vector3.ZERO, 0.0)
+	_ball(p, 0.07, Vector3(0.05, 0.17, 0.0), _om("panel", TEAL, Color(0.1, 0.5, 0.45)), Vector3(1, 0.7, 1.2))
+	_ball(p, 0.04, Vector3(-0.12, 0.15, 0.15), _om("brass", Color(1.3, 1.1, 0.4)), Vector3(1, 0.6, 1))
+	var leg := _om("panel", Color(0.25, 0.18, 0.2))
+	for sx: float in [-1.0, 1.0]:
+		for z: float in [-0.2, 0.0, 0.2]:
+			_taper(p, [Vector3(sx * 0.25, -0.08, z), Vector3(sx * 0.38, -0.12, z + 0.04), Vector3(sx * 0.3, -0.18, z + 0.1)], 0.03, 0.01, leg, 4)
+	_ball(p, 0.1, Vector3(0, -0.05, -0.42), _om("concrete", GORE), Vector3(1.2, 0.5, 0.5))
+	for i in 5:
+		_rod(p, 0.0, 0.012, 0.04, Vector3(-0.06 + i * 0.03, -0.03, -0.46), _om("panel", BONE), 4, Vector3(180, 0, 0))
+
+
+static func _o_greeter_smile(p: Node3D) -> void:
+	_ball(p, 0.42, Vector3.ZERO, _om("panel", PALE), Vector3(1.1, 0.9, 0.35), 0.04)
+	_ball(p, 0.3, Vector3(0, -0.1, -0.08), _om("panel", GORE), Vector3(1.05, 0.38, 0.3))
+	for i in 9:
+		var x := -0.24 + i * 0.06
+		var lift := absf(x) * 0.25
+		_box(p, Vector3(0.05, 0.06, 0.03), Vector3(x, -0.03 + lift, -0.15 + absf(x) * 0.1), _om("panel", BONE), Vector3.ZERO, 0.008)
+		_box(p, Vector3(0.05, 0.05, 0.03), Vector3(x, -0.17 + lift * 0.6, -0.15 + absf(x) * 0.1), _om("panel", BONE), Vector3.ZERO, 0.008)
+	for sx: float in [-1.0, 1.0]:
+		_box(p, Vector3(0.14, 0.022, 0.02), Vector3(sx * 0.17, 0.17, -0.13), _om("panel", BLACK), Vector3(0, 0, sx * -18.0), 0.0)
+		_ball(p, 0.07, Vector3(sx * 0.27, 0.02, -0.11), _om("panel", Color(1.4, 0.6, 0.65)), Vector3(1, 0.7, 0.3))
+	for i in 7:
+		var a := PI * 0.2 + i * PI * 0.1
+		_ball(p, 0.06, Vector3(cos(a) * 0.4, -sin(a) * 0.3, 0.08), _om("concrete", GORE), Vector3(1, 1, 0.6), 0.3)
+
+
+static func _o_collector_sack(p: Node3D) -> void:
+	_ball(p, 0.36, Vector3(0, -0.04, 0), _om("wood", Color(0.95, 0.8, 0.55)), Vector3(1.0, 1.05, 0.95), 0.22)
+	_rod(p, 0.09, 0.12, 0.08, Vector3(0, 0.33, 0), _om("wood", Color(0.8, 0.65, 0.45)), 7, Vector3.ZERO)
+	_rod(p, 0.1, 0.1, 0.03, Vector3(0, 0.3, 0), _om("panel", Color(0.45, 0.3, 0.2)), 7, Vector3.ZERO)
+	_taper(p, [Vector3(0.05, 0.36, 0.02), Vector3(0.1, 0.5, -0.02)], 0.03, 0.02, _om("panel", BONE), 5)
+	_ball(p, 0.04, Vector3(0.1, 0.52, -0.02), _om("panel", BONE))
+	_taper(p, [Vector3(-0.2, 0.15, -0.2), Vector3(-0.32, 0.28, -0.3)], 0.025, 0.02, _om("panel", BONE), 5)
+	_disc_x(p, 0.13, 0.05, Vector3(0.36, -0.22, 0.05), _om("panel", DARK), 10)
+	_disc_x(p, 0.06, 0.07, Vector3(0.36, -0.22, 0.05), _om("rust_metal", RUST), 6)
+	_ball(p, 0.3, Vector3(-0.05, -0.33, -0.05), _om("concrete", GORE), Vector3(1.0, 0.2, 0.9), 0.3)
+	_box(p, Vector3(0.12, 0.1, 0.01), Vector3(-0.1, 0.0, -0.34), _om("panel", Color(0.9, 0.9, 0.85)), Vector3(0, 0, 12), 0.0)
+
+
+static func _o_rat_spring(p: Node3D) -> void:
+	_ball(p, 0.2, Vector3(0, 0, 0), _om("concrete", MEAT), Vector3(1, 1.2, 0.9), 0.2)
+	_veins(p, Vector3.ZERO, 0.2, 5, 5, _om("concrete", GORE))
+	var brass := _om("brass", Color(1.3, 1.1, 0.6))
+	var points := []
+	for i in 36:
+		var a := TAU * i / 9.0
+		points.append(Vector3(cos(a) * 0.26, -0.18 + i * 0.01, sin(a) * 0.26))
+	_tube(p, points, 0.018, _om("panel", STEEL), 4)
+	_rod(p, 0.025, 0.025, 0.25, Vector3(0, 0, 0.3), brass, 6)
+	for sx: float in [-1.0, 1.0]:
+		_tube(p, _ring(Vector3.ZERO, 0.07, 8).map(func(v: Vector3) -> Vector3: return Vector3(sx * 0.07 + v.x, v.y, 0.47)), 0.02, brass, 4)
+	_disc_x(p, 0.1, 0.03, Vector3(0.22, 0.05, 0.0), brass, 10)
+	_taper(p, [Vector3(0, -0.1, -0.15), Vector3(0.05, -0.15, -0.3), Vector3(-0.03, -0.18, -0.45), Vector3(0.04, -0.17, -0.58)], 0.02, 0.006, _om("panel", Color(1.3, 0.75, 0.75)), 4)
+
+
+static func _o_fog_lung(p: Node3D) -> void:
+	var lung := _om("concrete", Color(0.8, 0.86, 1.0), Color(0.08, 0.12, 0.18))
+	for sx: float in [-1.0, 1.0]:
+		_ball(p, 0.24, Vector3(sx * 0.22, -0.05, 0), lung, Vector3(0.8, 1.25, 0.7), 0.15)
+		_taper(p, [Vector3(0, 0.2, 0), Vector3(sx * 0.12, 0.16, 0), Vector3(sx * 0.2, 0.08, 0)], 0.04, 0.03, _om("panel", SINEW), 5)
+	_taper(p, [Vector3(0, 0.2, 0), Vector3(0, 0.42, 0.02)], 0.05, 0.05, _om("panel", SINEW), 7)
+	for i in 4:
+		_rod(p, 0.058, 0.058, 0.02, Vector3(0, 0.24 + i * 0.05, 0.01), _om("panel", Color(1.3, 1.25, 1.1)), 7, Vector3.ZERO)
+	_ball(p, 0.06, Vector3(0, 0.44, 0.02), _om("concrete", GORE), Vector3(1, 0.5, 1))
+	_veins(p, Vector3(0.22, -0.05, 0), 0.22, 3, 2, _om("panel", Color(0.5, 0.55, 0.85)))
+	_veins(p, Vector3(-0.22, -0.05, 0), 0.22, 3, 4, _om("panel", Color(0.5, 0.55, 0.85)))
+
+
+static func _o_tuner_cords(p: Node3D) -> void:
+	var bone := _om("panel", BONE)
+	_taper(p, [Vector3(0, -0.5, 0), Vector3(0, -0.15, 0)], 0.04, 0.035, bone, 6)
+	_tube(p, [Vector3(-0.12, 0.45, 0), Vector3(-0.12, 0.0, 0), Vector3(-0.08, -0.12, 0), Vector3(0, -0.15, 0),
+			Vector3(0.08, -0.12, 0), Vector3(0.12, 0.0, 0), Vector3(0.12, 0.45, 0)], 0.035, bone, 6)
+	for i in 3:
+		var y := 0.05 + i * 0.14
+		_taper(p, [Vector3(-0.1, y, 0), Vector3(0, y - 0.03, -0.01), Vector3(0.1, y + 0.02, 0)], 0.016, 0.012, _om("concrete", MEAT, GORE * 0.3), 4)
+	_ball(p, 0.08, Vector3(0, -0.16, 0), _om("concrete", MEAT), Vector3(1.4, 0.8, 1.0), 0.3)
+	_ball(p, 0.05, Vector3(0, -0.52, 0), _om("concrete", GORE), Vector3(1, 0.6, 1), 0.3)
+
+
+static func _o_child_marble(p: Node3D) -> void:
+	_ball(p, 0.25, Vector3(0, 0.02, 0), _om("panel", Color(0.5, 1.1, 1.0), Color(0.05, 0.3, 0.3)), Vector3.ONE, 0.0)
+	_rod(p, 0.11, 0.11, 0.04, Vector3(0, 0.04, -0.23), _om("panel", Color(1.2, 0.85, 0.3)), 10)
+	_rod(p, 0.05, 0.05, 0.05, Vector3(0, 0.04, -0.245), _om("panel", BLACK), 8)
+	_ball(p, 0.11, Vector3(0.3, -0.12, 0.1), _om("panel", Color(1.3, 0.3, 0.3), Color(0.2, 0.0, 0.0)))
+	_ball(p, 0.09, Vector3(-0.28, -0.14, 0.05), _om("panel", Color(1.3, 1.2, 0.3), Color(0.2, 0.15, 0.0)))
+	_ball(p, 0.08, Vector3(-0.05, -0.16, 0.3), _om("panel", Color(0.6, 0.5, 1.3), Color(0.05, 0.0, 0.2)))
+	_taper(p, [Vector3(0.3, -0.12, 0.1), Vector3(0.1, -0.2, 0.25), Vector3(-0.15, -0.2, 0.2), Vector3(-0.28, -0.14, 0.05)], 0.012, 0.012, _om("panel", RED), 4)
+	_ball(p, 0.12, Vector3(0.05, -0.22, -0.05), _om("concrete", GORE), Vector3(1.6, 0.2, 1.3), 0.3)
+
+
+static func _o_spitter_sac(p: Node3D) -> void:
+	_ball(p, 0.36, Vector3.ZERO, _om("concrete", BILE, Color(0.2, 0.55, 0.05)), Vector3(1.0, 0.9, 1.0), 0.15)
+	_veins(p, Vector3.ZERO, 0.36, 8, 9, _om("concrete", Color(0.3, 0.35, 0.1)))
+	var throat := _om("concrete", FLESH)
+	_taper(p, [Vector3(0, 0.28, 0.05), Vector3(0.03, 0.42, 0.1), Vector3(0.0, 0.5, 0.18)], 0.12, 0.09, throat, 6)
+	_taper(p, [Vector3(0, -0.28, -0.05), Vector3(-0.03, -0.42, -0.08)], 0.1, 0.08, throat, 6)
+	_ball(p, 0.08, Vector3(0, 0.52, 0.2), _om("concrete", GORE), Vector3(1, 0.6, 1), 0.3)
+	_ball(p, 0.07, Vector3(-0.03, -0.44, -0.08), _om("concrete", GORE), Vector3(1, 0.6, 1), 0.3)
+	_ball(p, 0.07, Vector3(0.2, 0.1, -0.3), _om("panel", BILE, Color(0.4, 0.9, 0.1)), Vector3(1, 1, 0.5))
+
+
+static func _o_splitter_core(p: Node3D) -> void:
+	var meat := _om("concrete", MEAT)
+	var flesh := _om("concrete", FLESH)
+	_ball(p, 0.26, Vector3(-0.2, 0, 0.1), meat, Vector3.ONE, 0.22)
+	_ball(p, 0.24, Vector3(0.2, 0.02, 0.12), flesh, Vector3.ONE, 0.22)
+	_ball(p, 0.22, Vector3(0, 0.05, -0.2), meat, Vector3.ONE, 0.25)
+	_ball(p, 0.18, Vector3(0, 0.25, 0.0), flesh, Vector3.ONE, 0.25)
+	_veins(p, Vector3(0, 0.05, 0), 0.32, 7, 13, _om("concrete", GORE))
+	_bone_bits(p, Vector3(0, 0.0, 0.0), 6, 21)
+	_ball(p, 0.06, Vector3(0.08, 0.12, -0.4), _om("panel", BLACK, Color(0.2, 0.0, 0.0)))
+
+
+static func _o_dropper_arm(p: Node3D) -> void:
+	var skin := _om("concrete", Color(0.62, 0.6, 0.62))
+	_taper(p, [Vector3(0, 0, 0.5), Vector3(0, 0.02, 0.1), Vector3(0, -0.02, -0.1)], 0.05, 0.04, skin, 6)
+	_ball(p, 0.05, Vector3(0, -0.02, -0.12), skin)
+	_taper(p, [Vector3(0, -0.02, -0.12), Vector3(0, -0.04, -0.38)], 0.04, 0.035, skin, 6)
+	_box(p, Vector3(0.1, 0.03, 0.1), Vector3(0, -0.04, -0.43), skin, Vector3.ZERO, 0.012)
+	for i in 3:
+		var x := -0.035 + i * 0.035
+		_taper(p, [Vector3(x, -0.04, -0.48), Vector3(x * 1.3, -0.03, -0.6), Vector3(x * 1.4, -0.08, -0.7), Vector3(x * 1.3, -0.16, -0.7)],
+				0.016, 0.004, skin, 4)
+		_rod(p, 0.0, 0.008, 0.03, Vector3(x * 1.3, -0.17, -0.69), _om("panel", BLACK), 4, Vector3(180, 0, 0))
+	_ball(p, 0.07, Vector3(0, 0, 0.52), _om("concrete", GORE), Vector3(1, 1, 0.5), 0.35)
+	_rod(p, 0.02, 0.02, 0.06, Vector3(0, 0, 0.56), _om("panel", BONE), 5)
+
+
+static func _o_screamer_mask(p: Node3D) -> void:
+	var porcelain := _om("panel", Color(1.35, 1.32, 1.28))
+	_ball(p, 0.34, Vector3(0, 0.05, 0), porcelain, Vector3(0.82, 1.12, 0.3), 0.02)
+	var black := _om("panel", BLACK)
+	for sx: float in [-1.0, 1.0]:
+		_ball(p, 0.06, Vector3(sx * 0.11, 0.15, -0.08), black, Vector3(1.0, 0.75, 0.4))
+		_box(p, Vector3(0.018, 0.16, 0.01), Vector3(sx * 0.11, 0.04, -0.1), _om("panel", GORE), Vector3(0, 0, sx * 4.0), 0.0)
+	_ball(p, 0.09, Vector3(0, -0.13, -0.08), black, Vector3(0.75, 1.0, 0.4))
+	_box(p, Vector3(0.012, 0.22, 0.01), Vector3(0.08, 0.26, -0.085), black, Vector3(0, 0, -25), 0.0)
+	_box(p, Vector3(0.01, 0.12, 0.01), Vector3(0.14, 0.33, -0.08), black, Vector3(0, 0, 30), 0.0)
+	var rag := _om("carpet", Color(0.55, 0.5, 0.45))
+	for i in 5:
+		_box(p, Vector3(0.09, 0.28 + (i % 3) * 0.06, 0.012), Vector3(-0.2 + i * 0.1, -0.42, 0.04), rag, Vector3(0, 0, -10 + i * 5), 0.0)
+
+
+static func _o_hound_fang(p: Node3D) -> void:
+	var bone := _om("panel", BONE)
+	var u := [Vector3(-0.32, 0, 0.32), Vector3(-0.3, 0, 0.0), Vector3(-0.2, 0, -0.25), Vector3(0, 0, -0.33),
+		Vector3(0.2, 0, -0.25), Vector3(0.3, 0, 0.0), Vector3(0.32, 0, 0.32)]
+	_tube(p, u, 0.06, bone, 6)
+	_tube(p, u.map(func(v: Vector3) -> Vector3: return v * 0.97 + Vector3(0, 0.05, 0)), 0.04, _om("concrete", MEAT), 5)
+	for i in range(1, u.size() - 1):
+		for t: float in [0.0, 0.5]:
+			var at: Vector3 = (u[i] as Vector3).lerp(u[i + 1], t) if i + 1 < u.size() else u[i]
+			var tall := 0.13 if i == 2 or i == 4 else 0.07
+			_rod(p, 0.0, 0.025, tall, at + Vector3(0, 0.06 + tall * 0.5, 0), bone, 4, Vector3.ZERO)
+	for sx: float in [-1.0, 1.0]:
+		_ball(p, 0.1, Vector3(sx * 0.32, 0.02, 0.36), _om("concrete", GORE), Vector3(1, 1, 0.8), 0.35)
+		_ball(p, 0.07, Vector3(sx * 0.3, 0.07, 0.3), _om("concrete", MEAT), Vector3.ONE, 0.3)
+
+
+static func _o_weaver_gland(p: Node3D) -> void:
+	_ball(p, 0.3, Vector3(0, 0, 0.1), _om("panel", Color(1.15, 1.08, 0.95), Color(0.08, 0.08, 0.06)), Vector3(0.9, 0.85, 1.2), 0.12)
+	for i in 6:
+		var a := TAU * i / 6.0
+		_box(p, Vector3(0.02, 0.08, 0.02), Vector3(cos(a) * 0.25, sin(a) * 0.22 + 0.02, 0.15), _om("panel", Color(0.3, 0.22, 0.18)), Vector3(0, 0, rad_to_deg(a)), 0.0)
+	var silk := _om("panel", Color(1.4, 1.4, 1.35), Color(0.25, 0.25, 0.25))
+	for i in 3:
+		var x := -0.06 + i * 0.06
+		_rod(p, 0.035, 0.05, 0.08, Vector3(x, -0.04, -0.27), _om("concrete", FLESH), 5)
+		_taper(p, [Vector3(x, -0.04, -0.31), Vector3(x * 2.0, -0.08, -0.45), Vector3(x * 3.0, -0.2, -0.55), Vector3(x * 3.5, -0.32, -0.58)], 0.008, 0.005, silk, 3)
+	_taper(p, [Vector3(0.1, 0.1, 0.3), Vector3(0.3, 0.2, 0.45), Vector3(0.5, 0.05, 0.5)], 0.006, 0.004, silk, 3)
+	_ball(p, 0.08, Vector3(0, 0, 0.44), _om("concrete", GORE), Vector3(1, 1, 0.5), 0.35)
+
+
+static func _o_stalker_shadow(p: Node3D) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 77
+	for layer in 3:
+		var outline := PackedVector2Array()
+		var spikes := 11
+		for i in spikes * 2:
+			var a := TAU * i / (spikes * 2)
+			var r := (0.48 if i % 2 == 0 else 0.22) * rng.randf_range(0.7, 1.1) * (1.0 - layer * 0.2)
+			outline.append(Vector2(cos(a) * r * 0.8, sin(a) * r * 1.2))
+		var tint := Color(0.08, 0.06, 0.12) if layer != 1 else Color(0.18, 0.08, 0.3)
+		var glow := Color(0.0, 0.0, 0.0) if layer != 1 else Color(0.1, 0.0, 0.18)
+		_put(p, LowPoly.extrude(outline, 0.03), Vector3(0, layer * 0.04, 0), _om("panel", tint, glow), Vector3(90, layer * 23.0, 0))
+	for sx: float in [-1.0, 1.0]:
+		_ball(p, 0.035, Vector3(sx * 0.06, 0.13, -0.18), _om("panel", BONE, Color(0.8, 0.8, 0.8)))
+	_taper(p, [Vector3(0, 0.05, 0.2), Vector3(0.1, 0.15, 0.35), Vector3(-0.05, 0.25, 0.45)], 0.05, 0.005, _om("panel", Color(0.1, 0.06, 0.14)), 4)
+
+
+static func _o_eye_lens(p: Node3D) -> void:
+	_ball(p, 0.18, Vector3.ZERO, _om("panel", PALE), Vector3.ONE, 0.04)
+	_rod(p, 0.1, 0.1, 0.03, Vector3(0, 0, -0.17), _om("panel", Color(1.2, 0.2, 0.15), Color(0.3, 0.0, 0.0)), 10)
+	_rod(p, 0.045, 0.045, 0.04, Vector3(0, 0, -0.18), _om("panel", BLACK), 8)
+	_veins(p, Vector3.ZERO, 0.18, 6, 31, _om("panel", RED))
+	var wing := _om("panel", Color(0.35, 0.2, 0.32))
+	for sx: float in [-1.0, 1.0]:
+		var outline := PackedVector2Array([Vector2(0, 0.05), Vector2(sx * 0.2, 0.18), Vector2(sx * 0.45, 0.12), Vector2(sx * 0.5, -0.05),
+			Vector2(sx * 0.4, 0.0), Vector2(sx * 0.32, -0.08), Vector2(sx * 0.22, -0.02), Vector2(sx * 0.12, -0.07), Vector2(0, -0.03)])
+		_put(p, LowPoly.extrude(outline, 0.012), Vector3(sx * 0.12, 0.02, 0.05), wing, Vector3(0, sx * 20.0, 0))
+		_taper(p, [Vector3(sx * 0.12, 0.07, 0.05), Vector3(sx * 0.32, 0.2, 0.0), Vector3(sx * 0.58, 0.14, -0.05)], 0.012, 0.006, _om("panel", BONE), 4)
+	_ball(p, 0.05, Vector3(0, -0.02, 0.17), _om("concrete", GORE), Vector3(1, 1, 0.6), 0.3)
+
+
+## A few broken bone splinters poking out around c.
+static func _bone_bits(p: Node3D, c: Vector3, count: int, seed: int) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed
+	for i in count:
+		var dir := Vector3(rng.randf_range(-1, 1), rng.randf_range(-0.3, 1), rng.randf_range(-1, 1)).normalized()
+		_taper(p, [c + dir * 0.18, c + dir * 0.34], 0.025, 0.008, _om("panel", BONE), 4)

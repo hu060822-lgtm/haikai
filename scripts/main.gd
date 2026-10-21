@@ -16,7 +16,6 @@ var hud: HUD
 var run_active := false
 var last_result := {}
 var last_summary := {}
-var guardian_view: GuardianView
 
 var player: Player:
 	get: return run.local_player if run != null else null
@@ -154,12 +153,7 @@ func _on_run_requested(seed: int, roster: Dictionary) -> void:
 	run.name = "World"
 	run.seed = seed
 	run.roster = roster
-	var guardian: bool = roster.get(session.local_id(), {}).get("role", "") == "guardian"
-	# The guardian doesn't go in, so its gear stays in the stash.
-	if guardian:
-		run.loadout = {}
-	else:
-		run.loadout = _pending_loadout if _pending_loadout != null else GameState.consume_equipped()
+	run.loadout = _pending_loadout if _pending_loadout != null else GameState.consume_equipped()
 	_pending_loadout = null
 	run.local_player_spawned.connect(_on_local_player_spawned)
 	run.local_finished.connect(_on_local_finished)
@@ -184,18 +178,6 @@ func _on_run_requested(seed: int, roster: Dictionary) -> void:
 	_viewport.add_child(post_layer)
 	post_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
-	run.power_changed.connect(func(on: bool) -> void:
-		if not run.is_guardian:
-			hud.show_message("燈全亮回來了。" if on else "全場斷電了！出口也停了…", 4.0))
-
-	if guardian:
-		hud.visible = false
-		guardian_view = GuardianView.new()
-		guardian_view.run = run
-		guardian_view.pixel_scale = _container.stretch_shrink
-		add_child(guardian_view)
-		run_active = true
-		return
 	hud.set_objective(run.level.objective_text)
 	run_active = true
 	_capture_mouse(true)
@@ -207,9 +189,6 @@ func _on_local_player_spawned(local: Player) -> void:
 	var intro := "【%s】%s" % [run.level.map_name, run.level.intro]
 	if others > 0:
 		intro = "這次有 %d 個隊友。%s" % [others, intro]
-	var guardian := session.guardian_id()
-	if guardian != 0:
-		intro += "\n守墓者「%s」正在機房裡看著你們。" % session.roster[guardian].name
 	hud.show_message(intro, 6.0)
 	if session.is_online() and DisplayServer.get_name() != "headless":
 		_voice = VoiceChat.new()
@@ -270,7 +249,7 @@ func _physics_process(_delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
-	if run == null or guardian_view != null:
+	if run == null:
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		if run_active and player != null:
@@ -337,9 +316,6 @@ func _on_run_ended(summary: Dictionary) -> void:
 		return
 	run_active = false
 	last_summary = summary
-	var was_guardian := guardian_view != null
-	if was_guardian:
-		GameState.record_guardian(summary.get("guardian_won", false))
 	if not show_menus:
 		return
 	var result := last_result
@@ -349,16 +325,14 @@ func _on_run_ended(summary: Dictionary) -> void:
 		return
 	_capture_mouse(false)
 	hud.visible = false
-	if guardian_view != null:
-		guardian_view.visible = false
 	var screen := ResultScreen.new()
 	screen.summary = summary
-	screen.as_guardian = was_guardian
 	screen.survived = result.get("survived", false)
 	screen.cause = result.get("cause", "")
 	screen.items = result.get("items", [])
 	screen.payout = result.get("payout", {})
 	screen.lost_gear = result.get("lost_gear", [])
+	screen.organs = result.get("organs", [])
 	screen.continue_requested.connect(func() -> void:
 		if session.is_online():
 			show_lobby()
@@ -393,10 +367,7 @@ func _clear_run() -> void:
 		_container.queue_free()
 	if hud != null and is_instance_valid(hud):
 		hud.queue_free()
-	if guardian_view != null and is_instance_valid(guardian_view):
-		guardian_view.queue_free()
 	hud = null
-	guardian_view = null
 	_container = null
 	_viewport = null
 	run = null

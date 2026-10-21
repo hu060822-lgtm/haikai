@@ -410,7 +410,7 @@ func _build_shell() -> void:
 		# The portal face over the tunnel mouths, with the station's tiled band.
 		_box(Vector3(0.3, ROOF_Y - TUNNEL_TOP, WALL_Z * 2.0), Vector3(end * (HALL_X + 0.15), (ROOF_Y + TUNNEL_TOP) / 2.0, 0), "tile",
 			Vector3.ZERO, Layers.WORLD, Color(0.85, 0.86, 0.76), 1.0)
-	# The hall roof, which the guardian's camera sees through.
+	# The hall roof, which top-down cameras see through.
 	for i in 4:
 		var x0 := -HALL_X + i * HALL_X / 2.0
 		_roof(Vector3(HALL_X / 2.0, 1.0, WALL_Z * 2.0 + 2.0), Vector3(x0 + HALL_X / 4.0, ROOF_Y + 0.5, 0), "concrete", Color(0.35, 0.37, 0.36))

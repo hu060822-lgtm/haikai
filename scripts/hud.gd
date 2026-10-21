@@ -37,9 +37,15 @@ var _prompt_detail: Label
 var _prompt_row: HBoxContainer
 var _inventory: Label
 var _weight_bar: ProgressBar
+## What's in your arms when hauling a bulky item (name, weight, value, how to put it down).
+var _haul_panel: PanelContainer
+var _haul: Label
+var _haul_bar: ProgressBar
 var _gear: VBoxContainer
 var _timer: Label
 var _timer_panel: PanelContainer
+## 會醒來的廢墟: the eye under the timer (and its stage banner).
+var awakening_meter: AwakeningMeter
 var _objective: Label
 var _status: Label
 var _health: ProgressBar
@@ -133,6 +139,10 @@ func _build_top_centre() -> void:
 	_timer.custom_minimum_size = Vector2(84.0, 0.0)
 	_timer_panel.add_child(_timer)
 	stack.add_child(_timer_panel)
+	awakening_meter = AwakeningMeter.new()
+	awakening_meter.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	stack.add_child(awakening_meter)
+	awakening_meter.attach_banner(_root)
 	_toast = _panel(UiKit.TEXT)
 	_toast.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_message = _text("", 19)
@@ -233,6 +243,19 @@ func _build_bottom_left() -> void:
 	_voice = _text("", 14, UiKit.TEXT)
 	_voice.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	stack.add_child(_voice)
+
+	_haul_panel = _panel(UiKit.WARN)
+	_haul_panel.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	var haul_box := VBoxContainer.new()
+	haul_box.add_theme_constant_override("separation", 4)
+	_haul_panel.add_child(haul_box)
+	_haul = _text("", 16, UiKit.TEXT)
+	_haul.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	haul_box.add_child(_haul)
+	_haul_bar = _bar(UiKit.WARN, Vector2(240.0, 4.0))
+	haul_box.add_child(_haul_bar)
+	_haul_panel.visible = false
+	stack.add_child(_haul_panel)
 
 	var pack := _panel(Color(1.0, 1.0, 1.0, 0.25))
 	pack.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
@@ -459,6 +482,20 @@ func _process(delta: float) -> void:
 	_help.visible = _help.modulate.a > 0.01
 	_help_hint.modulate.a = 0.0 if _help.visible else 0.55
 	_update_weapon(delta)
+	_update_haul()
+
+
+func _update_haul() -> void:
+	var held: LootItem = _player.held_bulky if _player != null and is_instance_valid(_player) else null
+	_haul_panel.visible = held != null and is_instance_valid(held)
+	if not _haul_panel.visible:
+		return
+	var shared := held.carry != null and held.carry.holders.size() >= 2
+	var felt := _player.bulky_load()
+	_haul.text = "雙手：%s　%.0f kg　$%d\n%s　E 放下" % [held.item_name, held.weight, held.value,
+		"兩個人抬：你扛 %.0f kg" % felt if shared else "一個人扛（找隊友抬另一邊）"]
+	_haul_bar.value = clampf(felt / 120.0, 0.0, 1.0)
+	_set_bar_color(_haul_bar, UiKit.DANGER if felt > 60.0 else UiKit.WARN)
 
 
 ## A shot or stab landed: flash the X (red on a kill, orange when a big one breaks).
@@ -559,6 +596,9 @@ func _on_health_changed(ratio: float) -> void:
 func _on_inventory_changed(items: Array, weight: float, value: int) -> void:
 	var limit := Player.max_carry(_player)
 	_inventory.text = "背包 %d 件　%.1f / %.0f kg　$%d" % [items.size(), weight, limit, value]
+	var organs := items.filter(func(item: Dictionary) -> bool: return item.has("organ")).size()
+	if organs > 0:
+		_inventory.text += "　器官 %d" % organs
 	var ratio := weight / limit if limit > 0.0 else 0.0
 	_weight_bar.value = ratio
 	_set_bar_color(_weight_bar, UiKit.DANGER if ratio > 0.85 else (UiKit.WARN if ratio > 0.6 else UiKit.TEXT))

@@ -7,10 +7,6 @@ extends Node3D
 signal local_player_spawned(player: Player)
 signal local_finished(result: Dictionary)
 signal colossus_spawned(colossus: BoilerColossus)
-## Guardian's machine only: live energy, cooldowns and loot extracted so far.
-signal guardian_state(energy: float, cooldowns: Dictionary, extracted: int)
-signal guardian_ping(position: Vector3, radius: float)
-signal power_changed(on: bool)
 
 const MATCH_TIME := 900.0  # 15 minutes: the maps have big random wings to explore
 const BODY_SCATTER := 0.6
@@ -18,8 +14,6 @@ const BODY_SCATTER := 0.6
 static var instance: Run
 ## Tests pin the monster kinds; empty means a random draw (see MonsterRoster).
 static var forced_monsters: Array = []
-## Tests switch the AI director off so it doesn't meddle.
-static var director_enabled := true
 ## Tests pin the map; empty means a random draw (see MapRoster).
 static var forced_map := ""
 
@@ -31,10 +25,9 @@ var map_id := ""
 var local_player: Player
 var colossus: BoilerColossus
 var monster_kinds: Array[String] = []
-var field: FieldControl
 var warp: TimeWarp
-var director: Director
-var is_guardian := false
+## 會醒來的廢墟: how awake the map is (Awakening.sense_mult / speed_mult read it).
+var awakening: Awakening
 var time_left := MATCH_TIME
 var finished := false
 var rng := RandomNumberGenerator.new()
@@ -48,7 +41,6 @@ var _loot_spawner: MultiplayerSpawner
 var _loot_counter := 0
 var _monster_serial := 0
 var _time_broadcast := 0.0
-var _guardian_broadcast := 0.0
 
 
 func _enter_tree() -> void:
@@ -77,11 +69,11 @@ func _ready() -> void:
 	warp.name = "Warp"
 	add_child(warp)
 
-	field = FieldControl.new()
-	field.name = "Field"
-	field.run = self
-	add_child(field)
-	is_guardian = roster.get(multiplayer.get_unique_id(), {}).get("role", "") == "guardian"
+	awakening = Awakening.new()
+	awakening.name = "Awakening"
+	awakening.run = self
+	add_child(awakening)
+
 
 	players_root = _root("Players")
 	monsters_root = _root("Monsters")
@@ -93,10 +85,6 @@ func _ready() -> void:
 	var session := Session.instance
 	if _is_host():
 		session.world_ready_all.connect(_host_populate, CONNECT_ONE_SHOT)
-		field.pinged.connect(func(pos: Vector3, radius: float) -> void:
-			var guardian := Session.instance.guardian_id()
-			if guardian != 0:
-				_send_to(guardian, &"_guardian_ping", [pos, radius]))
 		multiplayer.peer_disconnected.connect(func(id: int) -> void:
 			var gone := players_root.get_node_or_null(str(id))
 			if gone != null:
@@ -119,11 +107,6 @@ func _process(delta: float) -> void:
 		if _time_broadcast <= 0.0:
 			_time_broadcast = 1.0
 			Session.instance.broadcast_time(time_left)
-		_guardian_broadcast -= delta
-		var guardian := Session.instance.guardian_id()
-		if guardian != 0 and _guardian_broadcast <= 0.0:
-			_guardian_broadcast = 0.25
-			_send_to(guardian, &"_guardian_state", [field.energy, field.cooldowns, Session.instance.extracted_total])
 
 
 func all_players() -> Array[Player]:
@@ -145,13 +128,7 @@ func _host_populate() -> void:
 		counts[squad] = index + 1
 		_player_spawner.spawn({"id": id, "name": roster[id].name, "index": index,
 			"squad": squad, "slot": squads.find(squad)})
-	if Session.instance.guardian_id() == 0 and director_enabled:
-		director = Director.new()
-		director.name = "Director"
-		director.field = field
-		director.run = self
-		director.rng.seed = rng.randi()
-		add_child(director)
+	awakening.rng.seed = rng.randi()
 	level.loot_pool = LootTable.make_pool(rng)
 	var loot := level.roll_loot()
 	for entry in loot:
@@ -201,7 +178,7 @@ func _host_spawn_monsters() -> void:
 			_monster_spawner.spawn(data)
 
 
-## Field control (host): the guardian or director closed a gate, cut power, released a monster.
+## Host: a gate (shop shutter, a door the tuner slams) closes or rolls back up.
 func host_set_gate(index: int, closed: bool) -> void:
 	_gate_set.rpc(index, closed)
 
@@ -210,26 +187,6 @@ func host_set_gate(index: int, closed: bool) -> void:
 func _gate_set(index: int, closed: bool) -> void:
 	if index >= 0 and index < level.gates.size():
 		level.gates[index].set_closed(closed)
-
-
-func host_set_power(on: bool) -> void:
-	_power_set.rpc(on)
-
-
-@rpc("authority", "call_local", "reliable")
-func _power_set(on: bool) -> void:
-	level.set_power(on)
-	power_changed.emit(on)
-
-
-func host_release_monster(kind: String, pos: Vector3) -> void:
-	_monster_serial += 1
-	var data := {"type": kind, "name": "%s%d" % [kind.capitalize(), _monster_serial], "seed": rng.randi(), "pos": pos}
-	if kind == "mimic":
-		data.rot = rng.randf_range(0.0, TAU)
-		data.disguise = LootTable.roll(rng, 0.8, level.loot_pool)
-	_monster_spawner.spawn(data)
-	_monster_released.rpc(pos)
 
 
 ## Host: quietly adds a monster of any roster kind (a splitter's crawlers), no hiss.
@@ -242,41 +199,6 @@ func host_spawn_monster(kind: String, pos: Vector3) -> void:
 		data.rot = rng.randf_range(0.0, TAU)
 		data.disguise = LootTable.roll(rng, 0.8, level.loot_pool)
 	_monster_spawner.spawn(data)
-
-
-@rpc("authority", "call_local", "reliable")
-func _monster_released(pos: Vector3) -> void:
-	Sfx.play_3d(self, pos, "hiss", -2.0, 25.0, 0.7)
-
-
-## Guardian's machine: ask the host to use a power. args: gate index, or [kind, position].
-func request_ability(ability: String, args := []) -> void:
-	_to_host(&"_ability", [ability, args])
-
-
-@rpc("any_peer", "call_local", "reliable")
-func _ability(ability: String, args: Array) -> void:
-	if not _is_host() or _sender() != Session.instance.guardian_id():
-		return
-	match ability:
-		"gate":
-			if args.size() == 1:
-				field.use_gate(int(args[0]))
-		"power":
-			field.use_power()
-		"monster":
-			if args.size() == 2:
-				field.use_monster(str(args[0]), args[1])
-
-
-@rpc("authority", "call_local", "unreliable_ordered")
-func _guardian_state(energy: float, cooldowns: Dictionary, extracted: int) -> void:
-	guardian_state.emit(energy, cooldowns, extracted)
-
-
-@rpc("authority", "call_local", "unreliable")
-func _guardian_ping(pos: Vector3, radius: float) -> void:
-	guardian_ping.emit(pos, radius)
 
 
 ## The patrol point farthest from where players start.
@@ -559,9 +481,9 @@ const LURE_RADIUS := 18.0
 const FLAME_CONE := 0.92  # cos of the flame jet's half angle (about 23 degrees)
 const ARC_CONE := 0.95
 ## Effects that only matter to the shooter's machine, never to what is hit.
-const LOCAL_EFFECTS := ["light", "thermal", "bayonet", "ghost"]
+const LOCAL_EFFECTS := ["light", "thermal", "bayonet", "ghost", "motion_sight", "squeal", "guard", "fang"]
 ## Effects that only change the numbers; a hit with nothing else is a plain (bullet) hit.
-const MODIFIER_EFFECTS := ["soft", "armor", "leech", "bounty", "lure"]
+const MODIFIER_EFFECTS := ["soft", "armor", "leech", "bounty", "lure", "scream", "hush", "lullaby"]
 
 var _burning := {}  # monster -> {"time", "tick", "attacker"}
 
@@ -605,6 +527,7 @@ func host_fire(stats: Dictionary, origin: Vector3, directions: Array, attacker: 
 	var damage: float = stats.damage
 	var aim: Vector3 = (directions[0] as Vector3).normalized()
 	GameNoise.emit_local(get_tree(), origin, stats.noise, GameNoise.Kind.IMPACT)
+	awakening.host_shot(origin, float(stats.noise), stats.effects.has("hush"))
 	var segments := []  # [from, to] of each tracer / arc / saw leg
 	var impacts := []
 	var to_monsters := {}  # monster -> damage this shot
@@ -684,6 +607,7 @@ func host_fire(stats: Dictionary, origin: Vector3, directions: Array, attacker: 
 			host_explode(landing, damage, float(effects.explode), effects, attacker)
 		if effects.get("lure", false):
 			GameNoise.emit_local(get_tree(), landing, LURE_RADIUS, GameNoise.Kind.ITEM)
+		Organs.host_impact(self, effects, landing, attacker)
 	var quiet: bool = stats.parts.get("muzzle", "") == "suppressor"
 	var shooter_name := String(attacker.name) if attacker != null else ""
 	_shot_fx.rpc(shooter_name, str(stats.frame), str(stats.kind), quiet, segments, impacts, effects.get("lure", false))
@@ -733,12 +657,12 @@ func _saw_path(origin: Vector3, aim: Vector3, rule: Dictionary, damage: float, c
 
 
 ## A knife stab (V), or a bayonet thrust.
-func request_melee(origin: Vector3, direction: Vector3, bayonet: bool) -> void:
-	_to_host(&"_melee", [origin, direction, bayonet])
+func request_melee(origin: Vector3, direction: Vector3, bayonet: bool, fang := false) -> void:
+	_to_host(&"_melee", [origin, direction, bayonet, fang])
 
 
 @rpc("any_peer", "call_local", "reliable")
-func _melee(origin: Vector3, direction: Vector3, bayonet: bool) -> void:
+func _melee(origin: Vector3, direction: Vector3, bayonet: bool, fang := false) -> void:
 	if not _is_host():
 		return
 	var attacker := players_root.get_node_or_null(str(_sender())) as Player
@@ -750,6 +674,10 @@ func _melee(origin: Vector3, direction: Vector3, bayonet: bool) -> void:
 	if bayonet:
 		effects["bayonet"] = true
 	var strength := 2.0 if bayonet else 1.0
+	if fang:
+		# The hound's jaw: three times the knife, and what it bites slows down.
+		strength = 3.0
+		effects["slow"] = 1.5
 	var hits := weapon_hits(rule, origin, direction)
 	if not hits.is_empty():
 		var monster: Node3D = hits[0][1]
@@ -836,7 +764,9 @@ func host_damage_monster(monster: Node3D, amount: float, effects: Dictionary, fr
 		_monster_hit_fx.rpc(String(monster.name), point, result)
 	if result == "kill":
 		if effects.get("bounty", false):
-			host_spawn_loot(LootTable.roll(rng, 1.0, level.loot_pool), monster.global_position + Vector3.UP * 0.6, 0.0, false)
+			var luck: float = effects.bounty if effects.bounty is float else 1.0
+			host_spawn_loot(LootTable.roll(rng, luck, level.loot_pool), monster.global_position + Vector3.UP * 0.6, 0.0, false)
+		Organs.host_drop(self, monster, false)
 		_burning.erase(monster)
 		_kill_monster(monster)
 	return dealt
@@ -905,10 +835,22 @@ func _host_burn(delta: float) -> void:
 ## A large monster ran out of health: it goes down for a long while (and can react).
 func _break_monster(monster: Node3D) -> void:
 	TimeWarp.stun(monster, BREAK_STUN)
+	awakening.host_break(monster.global_position)
 	_burning.erase(monster)
 	if monster.has_method("on_broken"):
 		monster.on_broken()
 	_monster_broken.rpc(monster.global_position)
+	Organs.host_drop(self, monster, true)
+
+
+## Host: an organ effect went off at a spot (scream, lullaby, acid puddle); every peer shows it.
+func host_organ_fx(kind: String, at: Vector3) -> void:
+	_organ_fx.rpc(kind, at)
+
+
+@rpc("authority", "call_local", "reliable")
+func _organ_fx(kind: String, at: Vector3) -> void:
+	Organs.play_fx(self, kind, at)
 
 
 @rpc("authority", "call_local", "reliable")
@@ -1056,6 +998,7 @@ func _chest(monster: Node3D) -> Vector3:
 ## Small and medium monsters can die: the monster's own host_kill() decides how (the
 ## child runs off to play elsewhere), otherwise it is gone.
 func _kill_monster(monster: Node3D) -> void:
+	awakening.host_kill(monster.global_position)
 	if monster is Mimic:
 		monster.host_action("kill", null)
 	elif monster.has_method("host_kill"):
@@ -1109,6 +1052,8 @@ func _shot_fx(shooter_name: String, frame: String, kind: String, quiet: bool, se
 		aim = ((segments[0][1] as Vector3) - (segments[0][0] as Vector3)).normalized()
 	ShotFx.fire_sound(self, muzzle, frame, quiet)
 	var own := shooter != null and shooter == local_player
+	if own:
+		awakening.shot_woke.emit(0.4 if quiet else 1.0)  # the HUD's eye flinches
 	if not own and kind != "cone":
 		ShotFx.muzzle_flash(self, muzzle, aim, Color(0.6, 0.85, 1.0) if kind == "arc" else Color(1.0, 0.75, 0.3))
 	match kind:
@@ -1239,7 +1184,7 @@ func _lucky() -> void:
 	for kind in MonsterRoster.MONSTERS:
 		if MonsterRoster.MONSTERS[kind].size != "large":
 			kinds.append(kind)
-	host_release_monster(kinds[rng.randi_range(0, kinds.size() - 1)], _far_patrol_point())
+	host_spawn_monster(kinds[rng.randi_range(0, kinds.size() - 1)], _far_patrol_point())
 
 
 @rpc("any_peer", "call_local", "reliable")
@@ -1252,6 +1197,8 @@ func _pull_lever() -> void:
 func _lever_pulled() -> void:
 	level.lever.play_pull()
 	level.complete_objective()
+	if _is_host():
+		awakening.add(Awakening.OBJECTIVE, level.lever.global_position)
 	if _is_host() and colossus != null:
 		colossus.enrage(level.lever.global_position)
 
@@ -1287,13 +1234,16 @@ func local_extracted() -> void:
 	if finished or local_player == null:
 		return
 	finished = true
-	var taken := local_player.take_all_items()
-	var payout := LootTable.payout(taken, rng)
+	# Organs are never sold: they go into the stash as gun parts.
+	var haul := Organs.split(local_player.take_all_items())
+	var payout := LootTable.payout(haul.rest, rng)
 	var gear := local_player.remaining_gear()
+	gear.append_array(haul.organs)
 	local_player.set_extracted()
 	GameState.record_extraction(payout.total, gear)
 	Session.instance.report_finished(payout.total)
-	local_finished.emit({"survived": true, "items": payout.items_list, "payout": payout, "cause": "", "lost_gear": []})
+	local_finished.emit({"survived": true, "items": payout.items_list, "payout": payout, "cause": "", "lost_gear": [],
+		"organs": haul.organs})
 
 
 ## The dreamcore map woke this player up: out you go, but half your loot stays in the dream.

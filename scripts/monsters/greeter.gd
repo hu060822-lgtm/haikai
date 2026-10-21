@@ -132,14 +132,14 @@ func _think(delta: float) -> void:
 		return
 
 	if _target != null and (not is_instance_valid(_target) or not _target.is_active() \
-			or _ignore.has(_target) or global_position.distance_to(_target.global_position) > FOLLOW_RANGE * 1.4):
+			or _ignore.has(_target) or global_position.distance_to(_target.global_position) > MonsterKit.sight(FOLLOW_RANGE) * 1.4):
 		_target = null
 	if _target == null and _cooldown <= 0.0:
 		for player in MonsterKit.active_players(get_tree()):
 			if _ignore.has(player):
 				continue
 			var chest := player.global_position + Vector3.UP
-			if global_position.distance_to(player.global_position) < FOLLOW_RANGE \
+			if global_position.distance_to(player.global_position) < MonsterKit.sight(FOLLOW_RANGE) \
 					and MonsterKit.clear_line(get_world_3d(), global_position + Vector3.UP * 1.6, chest, [get_rid()]):
 				_target = player
 				MonsterKit.tell(player, &"remote_warn", ["「歡迎光臨～」有個一直微笑的店員跟在你後面。", 0.0])

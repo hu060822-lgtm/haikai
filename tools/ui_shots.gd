@@ -36,8 +36,8 @@ func _run() -> void:
 	_save(out_dir, prefix + "loadout")
 
 	main.session.host(24561)
-	main.session.roster[2] = {"name": "阿明", "role": "scavenger", "squad": 1}
-	main.session.roster[3] = {"name": "小葵", "role": "guardian"}
+	main.session.roster[2] = {"name": "阿明", "squad": 1}
+	main.session.roster[3] = {"name": "小葵", "squad": 2}
 	main.session.roster_changed.emit()
 	main.show_lobby()
 	await _frames(15)
@@ -84,7 +84,7 @@ func _run() -> void:
 		result.items = [LootTable.ITEMS[0], LootTable.ITEMS[4], LootTable.ITEMS[4], LootTable.ITEMS[29]]
 		result.payout = LootTable.payout(result.items)
 		result.lost_gear = ["smg", "suppressor", "adrenaline"]
-		result.summary = {"extracted": 420, "threshold": 250, "guardian_won": false, "guardian": ""}
+		result.summary = {"extracted": 420, "scavengers": 3, "squads": [0, 1, 2], "squad_totals": {0: 420, 1: 130, 2: 0}}
 		root.add_child(result)
 		await _frames(20)
 		_save(out_dir, prefix + ("result" if survived else "result_dead"))

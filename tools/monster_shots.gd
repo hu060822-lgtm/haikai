@@ -25,7 +25,6 @@ func _run() -> void:
 	DirAccess.make_dir_recursive_absolute(out_dir)
 	GameState.save_enabled = false
 	GameState.reset()
-	Run.director_enabled = false
 	Run.forced_map = "factory"
 	Run.forced_monsters = ["watcher", "greeter", "collector", "rats", "centipede", "mother", "fog_walker", "tuner", "child"]
 	var main = load("res://scenes/main.tscn").instantiate()

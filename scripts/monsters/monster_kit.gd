@@ -1,5 +1,6 @@
 class_name MonsterKit
-## Shared helpers for monsters: low-poly parts, replication setup and player queries.
+## Shared helpers for monsters: low-poly parts, replication setup and player queries,
+## and the three senses (sound, light, motion) scaled by how awake the map is.
 
 
 static func box(parent: Node3D, size: Vector3, pos: Vector3, material: Material) -> MeshInstance3D:
@@ -106,3 +107,15 @@ static func tell(player: Player, method: StringName, args := []) -> void:
 	var call_args := [player.get_multiplayer_authority(), method]
 	call_args.append_array(args)
 	player.callv("rpc_id", call_args)
+
+
+## How far a monster notices things right now: its base range under the awakening
+## (×1.0 沉睡, ×1.3 驚醒, ×1.6 暴走). Hearing is scaled centrally in GameNoise.
+static func sight(base_range: float) -> float:
+	return base_range * Awakening.sense_mult()
+
+
+## The light sense: far if the player is lit (lantern, gun light, a bright map), short
+## in the dark; both scaled by the awakening.
+static func sight_of(player: Player, lit_range: float, dark_range: float) -> float:
+	return sight(lit_range if player.is_lit() else dark_range)

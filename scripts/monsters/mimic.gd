@@ -5,7 +5,8 @@ extends CharacterBody3D
 ## weapons or gear for a while; then it scuttles off to disguise itself somewhere else.
 ## Tells: it ticks softly and twitches now and then.
 ## Weakness players can learn: poke it with a weapon (crowbar or marble) and it dies.
-## But it dies SHRIEKING: shoot a mimic and everything nearby hears where you are.
+## How you kill it is your choice: a knife or bayonet kills it quietly, but shoot a mimic
+## and it dies SHRIEKING, and everything nearby hears where you are.
 
 const BITE_SECONDS := 8.0
 const BITE_DAMAGE := 15.0
@@ -15,6 +16,8 @@ const HIDE_TIME := 25.0
 const SHRIEK_RADIUS := 22.0
 
 ## Replicated: the item it pretends to be, and whether it's currently pretending.
+## The last hit was a blade (or a poke): it dies without its shriek.
+var _quiet_death := false
 var disguise: Dictionary = {}:
 	set(value):
 		disguise = value
@@ -97,6 +100,7 @@ func pry(_player: Player) -> void:
 
 ## Crowbar or slingshot marble.
 func weapon_hit() -> void:
+	_quiet_death = true  # a poke, not a gunshot
 	if Run.instance != null and not hidden:
 		Run.instance.request_monster_action(self, "kill")
 
@@ -120,6 +124,8 @@ func host_action(action: String, player: Player) -> void:
 func on_hit(hit: Dictionary) -> float:
 	if hidden:
 		return 0.0
+	var effects: Dictionary = hit.get("effects", {})
+	_quiet_death = effects.has("melee") or effects.has("bayonet")
 	if disguised:
 		_flee_from = hit.get("from", global_position)
 		disguised = false
@@ -127,12 +133,15 @@ func on_hit(hit: Dictionary) -> float:
 	return 1.0
 
 
-## Host: it dies with a shriek that carries.
+## Host: it dies with a shriek that carries, unless a blade got it first (a wet crunch).
 func host_kill() -> void:
 	if is_queued_for_deletion():
 		return
-	_play.rpc("screech")
-	GameNoise.emit_local(get_tree(), global_position, SHRIEK_RADIUS, GameNoise.Kind.VOICE)
+	if _quiet_death:
+		_play.rpc("bite")
+	else:
+		_play.rpc("screech")
+		GameNoise.emit_local(get_tree(), global_position, SHRIEK_RADIUS, GameNoise.Kind.VOICE)
 	queue_free()
 
 

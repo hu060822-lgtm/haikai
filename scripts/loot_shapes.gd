@@ -7,7 +7,8 @@ class_name LootShapes
 ## Shapes: box, cylinder, cone, sphere, capsule, plus the specific ones it can pick or
 ## that can be set directly: book, crate, sheet, bottle, can, jar, mug, bucket, battery,
 ## spool, rod, bolt, hourglass, button, disc, clock, gear, ring, bulb, helmet, teapot,
-## globe, bear, trophy, bell, flower, duster, fang.
+## globe, bear, trophy, bell, flower, duster, fang; and the PART_SHAPES (the bulky hauls and
+## heavy fillers), which also have a trim mesh in a second material (trim_mesh_for).
 ## Meshes are cached per shape, size and name, since many items share them.
 
 static var _cache := {}
@@ -154,6 +155,8 @@ static func _build(shape: String, size: Vector3, item_name: String) -> Mesh:
 	var r := minf(size.x, size.z) / 2.0
 	var h := size.y
 	var y0 := -h / 2.0
+	if PART_SHAPES.has(shape):
+		return LowPoly.merge(_parts(shape, size)[0])
 	match shape:
 		"book":
 			var cover := clampf(h * 0.18, 0.003, 0.01)
@@ -494,3 +497,332 @@ static func torus(major: float, minor: float, sides: int, tube_sides: int) -> Me
 		var a := -PI / 2.0 + TAU * i / tube_sides
 		profile.append(Vector2(major + cos(a) * minor, sin(a) * minor))
 	return LowPoly.lathe(profile, sides)
+
+
+# --- Bulky hauls and heavy fillers ----------------------------------------------------
+# These are built as two part lists: the body (the item's own texture and colour) and a
+# trim (dials, legs, screens, handles) in a contrasting material, so a big object reads
+# as a thing and not a tinted box. Front faces +z.
+
+## Shapes built by _parts(), with their trim's default look: [texture, colour, glow].
+const PART_SHAPES := {
+	"safe": ["brass", Color(1.0, 0.85, 0.5), Color.BLACK],
+	"generator": ["rust_metal", Color(0.32, 0.32, 0.34), Color.BLACK],
+	"motor": ["brass", Color(1.0, 0.65, 0.4), Color.BLACK],
+	"whistle": ["rust_metal", Color(0.4, 0.38, 0.36), Color.BLACK],
+	"anvil": ["", Color.WHITE, Color.BLACK],
+	"mannequin": ["wood", Color(0.45, 0.32, 0.25), Color.BLACK],
+	"vending_door": ["concrete", Color(0.16, 0.22, 0.26), Color(0.06, 0.1, 0.12)],
+	"bench": ["carpet", Color(0.65, 0.15, 0.2), Color.BLACK],
+	"beer_crate": ["concrete", Color(0.45, 0.28, 0.1), Color.BLACK],
+	"register": ["rust_metal", Color(0.25, 0.25, 0.27), Color.BLACK],
+	"station_sign": ["pipe", Color(0.75, 0.75, 0.78), Color.BLACK],
+	"payphone": ["rust_metal", Color(0.16, 0.16, 0.17), Color.BLACK],
+	"turnstile": ["pipe", Color(0.95, 0.95, 1.0), Color.BLACK],
+	"tv_wall": ["concrete", Color(0.5, 0.75, 0.65), Color(0.25, 0.42, 0.36)],
+	"hydrant": ["brass", Color(0.95, 0.8, 0.5), Color.BLACK],
+	"statue": ["concrete", Color(0.72, 0.72, 0.7), Color.BLACK],
+	"carousel_horse": ["pipe", Color(1.0, 0.45, 0.4), Color.BLACK],
+	"grandfather_clock": ["brass", Color(1.0, 0.9, 0.6), Color.BLACK],
+	"bathtub": ["brass", Color(1.0, 0.85, 0.5), Color.BLACK],
+	"car_battery": ["rust_metal", Color(0.85, 0.3, 0.2), Color.BLACK],
+	"ingot": ["", Color.WHITE, Color.BLACK],
+	"sack": ["", Color.WHITE, Color.BLACK],
+	"dumbbell": ["", Color.WHITE, Color.BLACK],
+	"rubble": ["", Color.WHITE, Color.BLACK],
+	"pan": ["", Color.WHITE, Color.BLACK],
+	"book_stack": ["", Color.WHITE, Color.BLACK],
+	"chain": ["", Color.WHITE, Color.BLACK],
+}
+
+static var _trim_cache := {}
+
+
+## The contrasting second mesh for shapes that have one (null otherwise).
+static func trim_mesh_for(data: Dictionary) -> Mesh:
+	var shape: String = data.get("shape", "box")
+	if not PART_SHAPES.has(shape) or PART_SHAPES[shape][0] == "":
+		return null
+	var size: Vector3 = data.size
+	var key := "%s:%s" % [shape, size]
+	if not _trim_cache.has(key):
+		var parts: Array = _parts(shape, size)[1]
+		_trim_cache[key] = null if parts.is_empty() else with_uvs(LowPoly.merge(parts), 1.0 / maxf(maxf(size.x, size.y), maxf(size.z, 0.05)))
+	return _trim_cache[key]
+
+
+static func trim_material(data: Dictionary) -> Material:
+	var style: Array = PART_SHAPES.get(data.get("shape", "box"), ["rust_metal", Color.WHITE, Color.BLACK])
+	return PS1Materials.get_material(style[0], style[1], true, Vector2.ONE, style[2])
+
+
+## [body parts, trim parts], each a list of [mesh, transform] for LowPoly.merge.
+static func _parts(shape: String, s: Vector3) -> Array:
+	var h := s.y
+	var y0 := -h / 2.0
+	var body := []
+	var trim := []
+	match shape:
+		"safe":
+			var foot := h * 0.06
+			body.append([LowPoly.chamfer_box(Vector3(s.x, h - foot, s.z * 0.92), s.x * 0.04), LowPoly.at(Vector3(0, foot / 2.0, -s.z * 0.04))])
+			for x in [-1.0, 1.0]:
+				for z in [-1.0, 1.0]:
+					trim.append([LowPoly.chamfer_box(Vector3(s.x * 0.14, foot, s.z * 0.14), 0.01), LowPoly.at(Vector3(x * s.x * 0.38, y0 + foot / 2.0, z * s.z * 0.36))])
+			# The door: a raised panel, a big dial, a three-spoke handle and two hinges.
+			body.append([LowPoly.chamfer_box(Vector3(s.x * 0.8, h * 0.74, s.z * 0.06), 0.015), LowPoly.at(Vector3(0, foot / 2.0, s.z * 0.43))])
+			trim.append([LowPoly.prism(12, s.x * 0.13, s.x * 0.12, s.z * 0.06), LowPoly.at(Vector3(-s.x * 0.12, h * 0.1, s.z * 0.48), Vector3(90, 0, 0))])
+			trim.append([LowPoly.prism(6, s.x * 0.04, s.x * 0.04, s.z * 0.1), LowPoly.at(Vector3(s.x * 0.2, -h * 0.05, s.z * 0.5), Vector3(90, 0, 0))])
+			for i in 3:
+				trim.append([LowPoly.chamfer_box(Vector3(s.x * 0.025, s.x * 0.16, s.x * 0.025), 0.004),
+					LowPoly.at(Vector3(s.x * 0.2, -h * 0.05, s.z * 0.53)) * LowPoly.at(Vector3.ZERO, Vector3(0, 0, i * 120.0)) * LowPoly.at(Vector3(0, s.x * 0.08, 0))])
+			for y in [-0.22, 0.25]:
+				trim.append([LowPoly.prism(6, s.x * 0.03, s.x * 0.03, h * 0.14), LowPoly.at(Vector3(-s.x * 0.41, h * y, s.z * 0.45))])
+		"generator":
+			var tank_r := minf(s.y * 0.24, s.z * 0.4)
+			var post := s.x * 0.035
+			# A tubular frame with the fuel tank on top and the engine slung inside.
+			for x in [-1.0, 1.0]:
+				for z in [-1.0, 1.0]:
+					trim.append([LowPoly.chamfer_box(Vector3(post, h * 0.9, post), 0.005), LowPoly.at(Vector3(x * (s.x / 2.0 - post), y0 + h * 0.45, z * (s.z / 2.0 - post)))])
+				trim.append([LowPoly.chamfer_box(Vector3(post, post, s.z), 0.005), LowPoly.at(Vector3(x * (s.x / 2.0 - post), y0 + post, 0))])
+			for z in [-1.0, 1.0]:
+				trim.append([LowPoly.chamfer_box(Vector3(s.x, post, post), 0.005), LowPoly.at(Vector3(0, y0 + h * 0.9 - post, z * (s.z / 2.0 - post)))])
+			body.append([LowPoly.prism(8, tank_r, tank_r, s.x * 0.82), LowPoly.at(Vector3(0, -y0 - tank_r * 1.1, 0), Vector3(0, 0, 90))])
+			trim.append([LowPoly.prism(6, tank_r * 0.25, tank_r * 0.25, tank_r * 0.4), LowPoly.at(Vector3(s.x * 0.2, -y0 - tank_r * 0.15, 0))])
+			body.append([LowPoly.chamfer_box(Vector3(s.x * 0.5, h * 0.45, s.z * 0.7), 0.03), LowPoly.at(Vector3(-s.x * 0.12, y0 + h * 0.3, 0))])
+			body.append([LowPoly.prism(10, h * 0.2, h * 0.2, s.z * 0.5), LowPoly.at(Vector3(s.x * 0.27, y0 + h * 0.28, 0), Vector3(90, 0, 0))])
+			trim.append([LowPoly.prism(6, s.x * 0.03, s.x * 0.03, h * 0.3), LowPoly.at(Vector3(-s.x * 0.3, y0 + h * 0.62, -s.z * 0.2))])
+			trim.append([LowPoly.chamfer_box(Vector3(s.x * 0.18, h * 0.12, s.z * 0.04), 0.008), LowPoly.at(Vector3(-s.x * 0.12, y0 + h * 0.36, s.z * 0.36))])
+		"motor":
+			var mr := minf(h, s.z) * 0.38
+			var length := s.x * 0.62
+			var fins := PackedVector2Array([Vector2(0, -length / 2.0)])
+			for i in 9:
+				var y := lerpf(-length / 2.0 + length * 0.08, length / 2.0 - length * 0.08, i / 8.0)
+				fins.append(Vector2(mr * 0.9, y - length * 0.02))
+				fins.append(Vector2(mr, y))
+				fins.append(Vector2(mr * 0.9, y + length * 0.02))
+			fins.append(Vector2(0, length / 2.0))
+			body.append([LowPoly.lathe(fins, 10), LowPoly.at(Vector3(-s.x * 0.04, y0 + h * 0.18 + mr, 0), Vector3(0, 0, 90))])
+			body.append([LowPoly.lathe(PackedVector2Array([Vector2(0, 0), Vector2(mr * 0.95, 0), Vector2(mr * 0.7, s.x * 0.1), Vector2(0, s.x * 0.12)]), 10),
+				LowPoly.at(Vector3(-s.x * 0.04 - length / 2.0, y0 + h * 0.18 + mr, 0), Vector3(0, 0, 90))])
+			trim.append([LowPoly.prism(8, mr * 0.18, mr * 0.18, s.x * 0.2), LowPoly.at(Vector3(s.x * 0.36, y0 + h * 0.18 + mr, 0), Vector3(0, 0, 90))])
+			trim.append([LowPoly.chamfer_box(Vector3(s.x * 0.18, h * 0.16, s.z * 0.35), 0.01), LowPoly.at(Vector3(0, y0 + h * 0.18 + mr * 2.0 + h * 0.06, 0))])
+			body.append([LowPoly.chamfer_box(Vector3(s.x * 0.66, h * 0.08, s.z * 0.9), 0.01), LowPoly.at(Vector3(-s.x * 0.04, y0 + h * 0.04, 0))])
+			for x in [-1.0, 1.0]:
+				body.append([LowPoly.chamfer_box(Vector3(s.x * 0.1, h * 0.2, s.z * 0.7), 0.01), LowPoly.at(Vector3(x * s.x * 0.2, y0 + h * 0.14, 0))])
+		"whistle":
+			var wr := minf(s.x, s.z) / 2.0
+			body.append([_lathe_y(s, [[0.0, 0.0], [0.7, 0.0], [0.7, 0.06], [0.3, 0.08], [0.32, 0.2], [0.55, 0.22],
+				[0.55, 0.3], [0.9, 0.32], [0.88, 0.88], [1.0, 0.9], [0.95, 0.96], [0.4, 1.0], [0.0, 1.0]], 10), Transform3D.IDENTITY])
+			trim.append([torus(wr * 0.5, wr * 0.06, 8, 4), LowPoly.at(Vector3(wr * 0.55, y0 + h * 0.14, 0), Vector3(0, 0, 90))])
+			trim.append([LowPoly.chamfer_box(Vector3(wr * 1.6, h * 0.03, h * 0.03), 0.004), LowPoly.at(Vector3(wr * 0.5, y0 + h * 0.27, 0), Vector3(0, 0, 10))])
+			trim.append([LowPoly.chamfer_box(Vector3(wr * 0.6, h * 0.06, wr * 0.15), 0.004), LowPoly.at(Vector3(0, y0 + h * 0.6, wr * 0.88))])
+		"anvil":
+			var w := s.x / 2.0
+			body.append([LowPoly.extrude(PackedVector2Array([
+				Vector2(-w * 0.55, y0), Vector2(w * 0.55, y0), Vector2(w * 0.4, y0 + h * 0.18), Vector2(w * 0.22, y0 + h * 0.3),
+				Vector2(w * 0.24, y0 + h * 0.62), Vector2(w * 0.85, y0 + h * 0.66), Vector2(w, -y0 - h * 0.12), Vector2(w, -y0),
+				Vector2(-w * 0.35, -y0), Vector2(-w * 0.7, -y0 - h * 0.08), Vector2(-w, -y0 - h * 0.18), Vector2(-w * 0.55, -y0 - h * 0.32),
+				Vector2(-w * 0.24, y0 + h * 0.62), Vector2(-w * 0.22, y0 + h * 0.3), Vector2(-w * 0.4, y0 + h * 0.18)]), s.z * 0.7), Transform3D.IDENTITY])
+			body.append([LowPoly.chamfer_box(Vector3(s.x * 0.55, h * 0.1, s.z), 0.01), LowPoly.at(Vector3(0, y0 + h * 0.05, 0))])
+		"mannequin":
+			var torso_h := h * 0.42
+			trim.append([LowPoly.prism(8, s.x * 0.4, s.x * 0.42, h * 0.025), LowPoly.at(Vector3(0, y0 + h * 0.0125, 0))])
+			trim.append([LowPoly.prism(6, s.x * 0.03, s.x * 0.03, h * 0.4), LowPoly.at(Vector3(0, y0 + h * 0.2, 0))])
+			body.append([_lathe_y(Vector3(s.x * 0.7, torso_h, s.z * 0.9), [[0.0, 0.0], [0.7, 0.0], [0.85, 0.12], [0.62, 0.42],
+				[0.7, 0.6], [0.8, 0.75], [1.0, 0.88], [0.9, 0.96], [0.3, 1.0], [0.0, 1.0]], 8, 1.5), LowPoly.at(Vector3(0, y0 + h * 0.4 + torso_h / 2.0, 0))])
+			body.append([LowPoly.prism(6, s.x * 0.06, s.x * 0.06, h * 0.06), LowPoly.at(Vector3(0, y0 + h * 0.4 + torso_h + h * 0.03, 0))])
+			body.append([LowPoly.blob(0.5, Vector3(s.x * 0.3, h * 0.13, s.z * 0.6), 1, 0.0, 4), LowPoly.at(Vector3(0, -y0 - h * 0.07, 0))])
+			for side in [-1.0, 1.0]:
+				var arm := PackedVector3Array([Vector3(side * s.x * 0.34, y0 + h * 0.4 + torso_h * 0.88, 0),
+					Vector3(side * s.x * 0.42, y0 + h * 0.4 + torso_h * 0.45, s.z * 0.05), Vector3(side * s.x * 0.4, y0 + h * 0.4 + torso_h * 0.05, s.z * 0.2)])
+				body.append([LowPoly.tube(arm, PackedFloat32Array([s.x * 0.06, s.x * 0.05, s.x * 0.04]), 5), Transform3D.IDENTITY])
+		"vending_door":
+			body.append([LowPoly.chamfer_box(Vector3(s.x, h, s.z * 0.7), 0.02), LowPoly.at(Vector3(0, 0, -s.z * 0.15))])
+			# The glass front with shelves of cans behind it, the button column and the flap.
+			trim.append([LowPoly.chamfer_box(Vector3(s.x * 0.62, h * 0.6, s.z * 0.3), 0.01), LowPoly.at(Vector3(-s.x * 0.1, h * 0.12, s.z * 0.25))])
+			for row in 5:
+				var y := h * 0.12 - h * 0.27 + row * h * 0.12
+				for col in 5:
+					body.append([LowPoly.prism(6, s.x * 0.035, s.x * 0.035, h * 0.07), LowPoly.at(Vector3(-s.x * 0.36 + col * s.x * 0.13, y + h * 0.04, s.z * 0.3))])
+			for i in 6:
+				trim.append([LowPoly.chamfer_box(Vector3(s.x * 0.1, h * 0.035, s.z * 0.2), 0.004), LowPoly.at(Vector3(s.x * 0.36, h * 0.3 - i * h * 0.06, s.z * 0.25))])
+			trim.append([LowPoly.chamfer_box(Vector3(s.x * 0.06, h * 0.06, s.z * 0.2), 0.004), LowPoly.at(Vector3(s.x * 0.36, -h * 0.1, s.z * 0.25))])
+			trim.append([LowPoly.chamfer_box(Vector3(s.x * 0.6, h * 0.1, s.z * 0.3), 0.01), LowPoly.at(Vector3(-s.x * 0.1, -h * 0.36, s.z * 0.25))])
+		"bench":
+			var seat := h * 0.22
+			body.append([LowPoly.chamfer_box(Vector3(s.x, seat * 0.5, s.z), 0.02), LowPoly.at(Vector3(0, -y0 - seat * 0.75, 0))])
+			trim.append([LowPoly.chamfer_box(Vector3(s.x * 0.94, seat * 0.5, s.z * 0.9), seat * 0.2), LowPoly.at(Vector3(0, -y0 - seat * 0.25, 0))])
+			for x in [-1.0, 1.0]:
+				for z in [-1.0, 1.0]:
+					var leg := PackedVector3Array([Vector3(x * s.x * 0.42, -y0 - seat, z * s.z * 0.38), Vector3(x * s.x * 0.44, y0 + h * 0.4, z * s.z * 0.42),
+						Vector3(x * s.x * 0.42, y0 + h * 0.05, z * s.z * 0.38)])
+					body.append([LowPoly.tube(leg, PackedFloat32Array([s.z * 0.06, s.z * 0.05, s.z * 0.035]), 5), Transform3D.IDENTITY])
+			body.append([LowPoly.chamfer_box(Vector3(s.x * 0.8, h * 0.04, s.z * 0.05), 0.005), LowPoly.at(Vector3(0, y0 + h * 0.3, 0))])
+		"beer_crate":
+			var wall := s.x * 0.04
+			body.append([LowPoly.chamfer_box(Vector3(s.x, h * 0.08, s.z), 0.01), LowPoly.at(Vector3(0, y0 + h * 0.04, 0))])
+			for side in [-1.0, 1.0]:
+				body.append([LowPoly.chamfer_box(Vector3(s.x, h * 0.62, wall), 0.008), LowPoly.at(Vector3(0, y0 + h * 0.31, side * (s.z / 2.0 - wall / 2.0)))])
+				body.append([LowPoly.extrude(PackedVector2Array([Vector2(-s.z / 2.0, 0), Vector2(s.z / 2.0, 0), Vector2(s.z / 2.0, h * 0.62),
+					Vector2(s.z * 0.15, h * 0.62), Vector2(s.z * 0.12, h * 0.5), Vector2(-s.z * 0.12, h * 0.5), Vector2(-s.z * 0.15, h * 0.62), Vector2(-s.z / 2.0, h * 0.62)]), wall),
+					LowPoly.at(Vector3(side * (s.x / 2.0 - wall / 2.0), y0, 0), Vector3(0, 90, 0))])
+			for i in 4:
+				for j in 3:
+					var at := Vector3(-s.x * 0.36 + i * s.x * 0.24, 0, -s.z * 0.3 + j * s.z * 0.3)
+					trim.append([_lathe_y(Vector3(s.x * 0.18, h, s.x * 0.18), [[0.0, 0.0], [0.9, 0.0], [0.95, 0.5], [0.85, 0.62],
+						[0.32, 0.8], [0.3, 0.97], [0.36, 1.0], [0.0, 1.0]], 6), LowPoly.at(at)])
+		"register":
+			body.append([LowPoly.chamfer_box(Vector3(s.x, h * 0.35, s.z), 0.015), LowPoly.at(Vector3(0, y0 + h * 0.175, 0))])
+			body.append([LowPoly.extrude(PackedVector2Array([Vector2(-s.z / 2.0, 0), Vector2(s.z * 0.3, 0), Vector2(s.z * 0.3, h * 0.3), Vector2(-s.z * 0.1, h * 0.3),
+				Vector2(-s.z / 2.0, h * 0.08)]), s.x * 0.9), LowPoly.at(Vector3(0, y0 + h * 0.35, 0), Vector3(0, -90, 0))])
+			body.append([LowPoly.chamfer_box(Vector3(s.x * 0.12, h * 0.12, s.z * 0.1), 0.01), LowPoly.at(Vector3(0, y0 + h * 0.7, -s.z * 0.3))])
+			body.append([LowPoly.chamfer_box(Vector3(s.x * 0.6, h * 0.2, s.z * 0.12), 0.01), LowPoly.at(Vector3(0, y0 + h * 0.86, -s.z * 0.3), Vector3(-15, 0, 0))])
+			for row in 3:
+				for col in 5:
+					trim.append([LowPoly.chamfer_box(Vector3(s.x * 0.1, h * 0.04, s.z * 0.08), 0.004),
+						LowPoly.at(Vector3(-s.x * 0.3 + col * s.x * 0.15, y0 + h * 0.36 + h * 0.025 + row * h * 0.05, s.z * 0.38 - row * s.z * 0.14), Vector3(-25, 0, 0))])
+			trim.append([LowPoly.chamfer_box(Vector3(s.x * 0.5, h * 0.12, s.z * 0.03), 0.004), LowPoly.at(Vector3(0, y0 + h * 0.86, -s.z * 0.235), Vector3(-15, 0, 0))])
+			trim.append([LowPoly.chamfer_box(Vector3(s.x * 0.3, h * 0.04, s.z * 0.04), 0.004), LowPoly.at(Vector3(0, y0 + h * 0.15, s.z * 0.5))])
+		"station_sign":
+			var board := h * 0.3
+			trim.append([LowPoly.prism(8, s.x * 0.2, s.x * 0.22, h * 0.02), LowPoly.at(Vector3(0, y0 + h * 0.01, 0))])
+			trim.append([LowPoly.prism(6, s.z * 0.3, s.z * 0.3, h - board * 0.5), LowPoly.at(Vector3(0, y0 + (h - board * 0.5) / 2.0, 0))])
+			body.append([LowPoly.chamfer_box(Vector3(s.x, board, s.z * 0.5), 0.02), LowPoly.at(Vector3(0, -y0 - board / 2.0, 0))])
+			trim.append([LowPoly.chamfer_box(Vector3(s.x * 0.92, board * 0.1, s.z * 0.56), 0.004), LowPoly.at(Vector3(0, -y0 - board * 0.72, 0))])
+			trim.append([LowPoly.chamfer_box(Vector3(s.x * 0.5, board * 0.16, s.z * 0.56), 0.004), LowPoly.at(Vector3(-s.x * 0.12, -y0 - board * 0.38, 0))])
+			trim.append([LowPoly.prism(3, board * 0.12, 0.0, board * 0.22), LowPoly.at(Vector3(s.x * 0.34, -y0 - board * 0.38, 0), Vector3(0, 0, -90), Vector3(1, 1, 0.3))])
+		"payphone":
+			body.append([LowPoly.chamfer_box(Vector3(s.x * 0.8, h * 0.85, s.z * 0.75), 0.03), LowPoly.at(Vector3(s.x * 0.1, -h * 0.05, -s.z * 0.1))])
+			body.append([LowPoly.chamfer_box(Vector3(s.x * 0.86, h * 0.1, s.z * 0.85), 0.02), LowPoly.at(Vector3(s.x * 0.1, -y0 - h * 0.05, -s.z * 0.06))])
+			trim.append([_capsule(Vector3(s.x * 0.16, h * 0.5, s.x * 0.16)), LowPoly.at(Vector3(-s.x * 0.36, h * 0.02, s.z * 0.1))])
+			trim.append([LowPoly.chamfer_box(Vector3(s.x * 0.08, h * 0.12, s.z * 0.15), 0.004), LowPoly.at(Vector3(-s.x * 0.28, h * 0.22, s.z * 0.1))])
+			var cord := PackedVector3Array([Vector3(-s.x * 0.36, -h * 0.22, s.z * 0.1), Vector3(-s.x * 0.3, -h * 0.38, s.z * 0.2), Vector3(-s.x * 0.15, -h * 0.4, s.z * 0.25), Vector3(-s.x * 0.05, -h * 0.3, s.z * 0.2)])
+			trim.append([LowPoly.tube(cord, PackedFloat32Array([s.x * 0.025, s.x * 0.025, s.x * 0.025, s.x * 0.025]), 4), Transform3D.IDENTITY])
+			for row in 4:
+				for col in 3:
+					trim.append([LowPoly.chamfer_box(Vector3(s.x * 0.1, h * 0.04, s.z * 0.06), 0.004), LowPoly.at(Vector3(s.x * (-0.02 + col * 0.14), h * (0.12 - row * 0.07), s.z * 0.3))])
+			trim.append([LowPoly.chamfer_box(Vector3(s.x * 0.04, h * 0.08, s.z * 0.06), 0.003), LowPoly.at(Vector3(s.x * 0.36, h * 0.25, s.z * 0.3))])
+			trim.append([LowPoly.chamfer_box(Vector3(s.x * 0.3, h * 0.08, s.z * 0.1), 0.006), LowPoly.at(Vector3(s.x * 0.12, -h * 0.32, s.z * 0.3))])
+		"turnstile":
+			var cab := Vector3(s.x * 0.36, h * 0.9, s.z)
+			body.append([LowPoly.chamfer_box(cab, 0.03), LowPoly.at(Vector3(-s.x / 2.0 + cab.x / 2.0, y0 + cab.y / 2.0, 0))])
+			trim.append([LowPoly.chamfer_box(Vector3(cab.x * 0.7, h * 0.02, s.z * 0.3), 0.005), LowPoly.at(Vector3(-s.x / 2.0 + cab.x / 2.0, y0 + cab.y + h * 0.01, s.z * 0.2))])
+			var hub := Vector3(-s.x / 2.0 + cab.x + s.x * 0.03, y0 + h * 0.72, 0)
+			trim.append([LowPoly.prism(8, h * 0.07, h * 0.06, s.x * 0.1), LowPoly.at(hub, Vector3(0, 0, -50))])
+			# Three arms radiating from a hub whose axle tilts up out of the cabinet's side.
+			var axle := LowPoly.at(hub, Vector3(0, 0, -50))
+			for i in 3:
+				var arm := axle * LowPoly.at(Vector3.ZERO, Vector3(0, i * 120.0, 0)) * LowPoly.at(Vector3(s.x * 0.26, 0, 0), Vector3(0, 0, 90))
+				trim.append([LowPoly.prism(6, h * 0.025, h * 0.025, s.x * 0.52), arm])
+		"tv_wall":
+			var cell := Vector3(s.x / 3.0, h / 3.0, s.z)
+			for row in 3:
+				for col in 3:
+					var jitter := Vector3(((row * 7 + col * 3) % 5 - 2) * 0.01, 0, ((row + col * 2) % 3 - 1) * 0.03)
+					var c := Vector3(-s.x / 2.0 + cell.x * (col + 0.5), y0 + cell.y * (row + 0.5), 0) + jitter
+					body.append([LowPoly.chamfer_box(Vector3(cell.x * 0.96, cell.y * 0.96, s.z * 0.88), cell.x * 0.05), LowPoly.at(c - Vector3(0, 0, s.z * 0.06))])
+					trim.append([LowPoly.chamfer_box(Vector3(cell.x * 0.7, cell.y * 0.68, s.z * 0.1), cell.x * 0.06), LowPoly.at(c + Vector3(-cell.x * 0.06, 0, s.z * 0.4))])
+		"hydrant":
+			var hr := minf(s.x, s.z) / 2.0
+			body.append([_lathe_y(s, [[0.0, 0.0], [0.85, 0.0], [0.85, 0.06], [0.6, 0.08], [0.55, 0.7], [0.68, 0.72], [0.68, 0.78],
+				[0.55, 0.8], [0.5, 0.92], [0.25, 1.0], [0.0, 1.0]], 8), Transform3D.IDENTITY])
+			for side in [-1.0, 1.0]:
+				trim.append([LowPoly.prism(6, hr * 0.22, hr * 0.22, hr * 0.5), LowPoly.at(Vector3(side * hr * 0.6, y0 + h * 0.55, 0), Vector3(0, 0, 90))])
+			trim.append([LowPoly.prism(6, hr * 0.32, hr * 0.32, hr * 0.4), LowPoly.at(Vector3(0, y0 + h * 0.5, hr * 0.62), Vector3(90, 0, 0))])
+			trim.append([LowPoly.prism(5, hr * 0.12, hr * 0.12, h * 0.06), LowPoly.at(Vector3(0, -y0 - h * 0.01, 0))])
+		"statue":
+			var plinth := h * 0.18
+			trim.append([LowPoly.chamfer_box(Vector3(s.x, plinth, s.z), 0.02), LowPoly.at(Vector3(0, y0 + plinth / 2.0, 0))])
+			var fy := y0 + plinth
+			var fh := h - plinth
+			for side in [-1.0, 1.0]:
+				body.append([LowPoly.tube(PackedVector3Array([Vector3(side * s.x * 0.1, fy, 0), Vector3(side * s.x * 0.12, fy + fh * 0.25, s.z * 0.04),
+					Vector3(side * s.x * 0.1, fy + fh * 0.48, 0)]), PackedFloat32Array([s.x * 0.07, s.x * 0.08, s.x * 0.1]), 6), Transform3D.IDENTITY])
+			body.append([LowPoly.blob(0.5, Vector3(s.x * 0.45, fh * 0.34, s.z * 0.35), 1, 0.04, 11), LowPoly.at(Vector3(0, fy + fh * 0.64, 0))])
+			body.append([LowPoly.blob(fh * 0.075, Vector3(1, 1.15, 1), 1, 0.05, 3), LowPoly.at(Vector3(0, fy + fh * 0.9, s.z * 0.02))])
+			body.append([LowPoly.tube(PackedVector3Array([Vector3(s.x * 0.2, fy + fh * 0.76, 0), Vector3(s.x * 0.36, fy + fh * 0.86, s.z * 0.1),
+				Vector3(s.x * 0.4, fy + fh, s.z * 0.15)]), PackedFloat32Array([s.x * 0.06, s.x * 0.05, s.x * 0.04]), 5), Transform3D.IDENTITY])
+			body.append([LowPoly.tube(PackedVector3Array([Vector3(-s.x * 0.2, fy + fh * 0.76, 0), Vector3(-s.x * 0.28, fy + fh * 0.6, s.z * 0.12),
+				Vector3(-s.x * 0.18, fy + fh * 0.5, s.z * 0.25)]), PackedFloat32Array([s.x * 0.06, s.x * 0.05, s.x * 0.045]), 5), Transform3D.IDENTITY])
+		"carousel_horse":
+			var pole := s.x * 0.08
+			trim.append([LowPoly.prism(8, pole, pole, h), Transform3D.IDENTITY])
+			trim.append([LowPoly.prism(8, pole * 2.0, pole * 1.4, h * 0.04), LowPoly.at(Vector3(0, -y0 - h * 0.02, 0))])
+			var by := y0 + h * 0.42
+			var hl := s.z
+			body.append([LowPoly.blob(0.5, Vector3(s.x * 1.0, h * 0.24, hl * 0.66), 1, 0.03, 8), LowPoly.at(Vector3(0, by, 0))])
+			body.append([LowPoly.tube(PackedVector3Array([Vector3(0, by + h * 0.05, hl * 0.2), Vector3(0, by + h * 0.18, hl * 0.32), Vector3(0, by + h * 0.27, hl * 0.36)]),
+				PackedFloat32Array([s.x * 0.42, s.x * 0.34, s.x * 0.26]), 6), Transform3D.IDENTITY])
+			body.append([LowPoly.blob(0.5, Vector3(s.x * 0.6, h * 0.09, hl * 0.26), 1, 0.0, 2), LowPoly.at(Vector3(0, by + h * 0.27, hl * 0.43), Vector3(25, 0, 0))])
+			body.append([LowPoly.extrude(PackedVector2Array([Vector2(0, 0), Vector2(hl * 0.18, -h * 0.02), Vector2(hl * 0.1, h * 0.06)]), s.x * 0.12),
+				LowPoly.at(Vector3(0, by + h * 0.2, hl * 0.26), Vector3(0, -90, 0))])
+			for side in [-1.0, 1.0]:
+				body.append([LowPoly.tube(PackedVector3Array([Vector3(side * s.x * 0.2, by - h * 0.05, hl * 0.18), Vector3(side * s.x * 0.22, by - h * 0.12, hl * 0.4),
+					Vector3(side * s.x * 0.22, by - h * 0.24, hl * 0.38)]), PackedFloat32Array([s.x * 0.12, s.x * 0.09, s.x * 0.07]), 5), Transform3D.IDENTITY])
+				body.append([LowPoly.tube(PackedVector3Array([Vector3(side * s.x * 0.2, by - h * 0.05, -hl * 0.18), Vector3(side * s.x * 0.22, by - h * 0.15, -hl * 0.32),
+					Vector3(side * s.x * 0.22, by - h * 0.26, -hl * 0.45)]), PackedFloat32Array([s.x * 0.12, s.x * 0.09, s.x * 0.07]), 5), Transform3D.IDENTITY])
+			body.append([LowPoly.tube(PackedVector3Array([Vector3(0, by + h * 0.04, -hl * 0.26), Vector3(0, by - h * 0.02, -hl * 0.4), Vector3(0, by - h * 0.12, -hl * 0.47)]),
+				PackedFloat32Array([s.x * 0.12, s.x * 0.1, 0.0]), 5), Transform3D.IDENTITY])
+			trim.append([LowPoly.chamfer_box(Vector3(s.x * 0.95, h * 0.03, hl * 0.2), 0.01), LowPoly.at(Vector3(0, by + h * 0.1, -hl * 0.02))])
+		"grandfather_clock":
+			var base := h * 0.2
+			var hood := h * 0.25
+			body.append([LowPoly.chamfer_box(Vector3(s.x, base, s.z), 0.02), LowPoly.at(Vector3(0, y0 + base / 2.0, 0))])
+			body.append([LowPoly.chamfer_box(Vector3(s.x * 0.75, h - base - hood, s.z * 0.8), 0.015), LowPoly.at(Vector3(0, y0 + base + (h - base - hood) / 2.0, 0))])
+			body.append([LowPoly.extrude(LowPoly.arch_outline(s.x, hood, 6), s.z), LowPoly.at(Vector3(0, -y0 - hood, 0))])
+			var face_r := minf(s.x * 0.36, hood * 0.38)
+			trim.append([LowPoly.prism(12, face_r, face_r, s.z * 0.06), LowPoly.at(Vector3(0, -y0 - hood * 0.5, s.z * 0.5), Vector3(90, 0, 0))])
+			body.append([LowPoly.chamfer_box(Vector3(face_r * 0.1, face_r * 0.7, s.z * 0.03), 0.002), LowPoly.at(Vector3(0, -y0 - hood * 0.5 + face_r * 0.3, s.z * 0.54))])
+			body.append([LowPoly.chamfer_box(Vector3(face_r * 0.1, face_r * 0.5, s.z * 0.03), 0.002), LowPoly.at(Vector3(face_r * 0.2, -y0 - hood * 0.5 + face_r * 0.05, s.z * 0.54), Vector3(0, 0, -70))])
+			trim.append([LowPoly.prism(4, s.x * 0.012, s.x * 0.012, h * 0.3), LowPoly.at(Vector3(0, y0 + base + h * 0.25, s.z * 0.41))])
+			trim.append([LowPoly.prism(10, s.x * 0.12, s.x * 0.12, s.z * 0.04), LowPoly.at(Vector3(0, y0 + base + h * 0.1, s.z * 0.42), Vector3(90, 0, 0))])
+			trim.append([LowPoly.chamfer_box(Vector3(s.x * 0.86, h * 0.02, s.z * 1.04), 0.004), LowPoly.at(Vector3(0, y0 + base, 0))])
+		"bathtub":
+			var tub_h := h * 0.8
+			body.append([_lathe_y(Vector3(s.z, tub_h, s.z), [[0.0, 0.0], [0.75, 0.0], [0.9, 0.12], [0.98, 0.7], [1.0, 0.94],
+				[0.96, 1.0], [0.88, 0.96], [0.84, 0.3], [0.0, 0.22]], 10, s.x / s.z), LowPoly.at(Vector3(0, -y0 - tub_h / 2.0, 0))])
+			for x in [-1.0, 1.0]:
+				for z in [-1.0, 1.0]:
+					trim.append([LowPoly.lathe(PackedVector2Array([Vector2(0, 0), Vector2(s.z * 0.07, 0), Vector2(s.z * 0.05, h * 0.12), Vector2(s.z * 0.08, h * 0.2), Vector2(0, h * 0.24)]), 5),
+						LowPoly.at(Vector3(x * s.x * 0.34, y0, z * s.z * 0.3))])
+			var spout := PackedVector3Array([Vector3(s.x * 0.48, -y0 - h * 0.05, 0), Vector3(s.x * 0.47, -y0 + h * 0.0, 0), Vector3(s.x * 0.4, -y0 - h * 0.02, 0)])
+			trim.append([LowPoly.tube(spout, PackedFloat32Array([s.z * 0.03, s.z * 0.03, s.z * 0.025]), 5), LowPoly.at(Vector3(0, -h * 0.03, 0))])
+		"car_battery":
+			body.append([LowPoly.chamfer_box(Vector3(s.x, h * 0.85, s.z), 0.01), LowPoly.at(Vector3(0, y0 + h * 0.425, 0))])
+			body.append([LowPoly.chamfer_box(Vector3(s.x * 0.96, h * 0.06, s.z * 0.96), 0.01), LowPoly.at(Vector3(0, y0 + h * 0.88, 0))])
+			for side in [-1.0, 1.0]:
+				trim.append([LowPoly.prism(6, s.z * 0.08, s.z * 0.07, h * 0.12), LowPoly.at(Vector3(side * s.x * 0.33, -y0 - h * 0.06, 0))])
+		"ingot":
+			body.append([LowPoly.extrude(PackedVector2Array([Vector2(-s.z / 2.0, y0), Vector2(s.z / 2.0, y0), Vector2(s.z * 0.36, -y0), Vector2(-s.z * 0.36, -y0)]), s.x), LowPoly.at(Vector3.ZERO, Vector3(0, 90, 0))])
+		"sack":
+			body.append([LowPoly.blob(0.5, Vector3(s.x, h * 0.78, s.z), 1, 0.12, 21), LowPoly.at(Vector3(0, y0 + h * 0.39, 0))])
+			body.append([LowPoly.prism(6, s.x * 0.12, s.x * 0.22, h * 0.24), LowPoly.at(Vector3(0, -y0 - h * 0.12, 0))])
+		"dumbbell":
+			body.append([LowPoly.prism(6, h * 0.12, h * 0.12, s.x), LowPoly.at(Vector3.ZERO, Vector3(0, 0, 90))])
+			for side in [-1.0, 1.0]:
+				body.append([LowPoly.prism(6, h * 0.5, h * 0.5, s.x * 0.18), LowPoly.at(Vector3(side * s.x * 0.36, 0, 0), Vector3(0, 0, 90))])
+				body.append([LowPoly.prism(6, h * 0.4, h * 0.4, s.x * 0.1), LowPoly.at(Vector3(side * s.x * 0.22, 0, 0), Vector3(0, 0, 90))])
+		"rubble":
+			body.append([LowPoly.blob(0.5, s, 0, 0.3, 77), Transform3D.IDENTITY])
+			body.append([LowPoly.prism(4, s.x * 0.03, s.x * 0.03, s.x * 0.5), LowPoly.at(Vector3(s.x * 0.2, h * 0.3, 0), Vector3(0, 0, 60))])
+		"pan":
+			var pr := s.x / 2.0
+			body.append([LowPoly.lathe(PackedVector2Array([Vector2(0, -h / 2.0), Vector2(pr * 0.85, -h / 2.0), Vector2(pr, h / 2.0), Vector2(pr * 0.92, h / 2.0),
+				Vector2(pr * 0.8, -h * 0.3), Vector2(0, -h * 0.3)]), 10), LowPoly.at(Vector3(0, 0, -s.z / 2.0 + pr))])
+			body.append([LowPoly.chamfer_box(Vector3(s.x * 0.14, h * 0.4, s.z - pr * 2.0), 0.005), LowPoly.at(Vector3(0, h * 0.2, s.z / 2.0 - (s.z - pr * 2.0) / 2.0), Vector3(-6, 0, 0))])
+		"book_stack":
+			var count := 4
+			for i in count:
+				var t := h / count
+				body.append([LowPoly.chamfer_box(Vector3(s.x * 0.92, t * 0.94, s.z * 0.92), 0.004),
+					LowPoly.at(Vector3(((i * 5) % 3 - 1) * s.x * 0.03, y0 + t * (i + 0.5), ((i * 7) % 3 - 1) * s.z * 0.03), Vector3(0, ((i * 11) % 5 - 2) * 4.0, 0))])
+		"chain":
+			var link := s.x * 0.12
+			for i in 7:
+				var a := i * 0.9
+				var at := Vector3(cos(a) * s.x * (0.12 + i * 0.04), y0 + link * 0.4 + (i % 2) * link * 0.3, sin(a) * s.z * (0.12 + i * 0.04))
+				body.append([torus(link, link * 0.22, 6, 4), LowPoly.at(at, Vector3(90 if i % 2 == 0 else 20, rad_to_deg(a), 0), Vector3(1.4, 1, 1))])
+	return [body, trim]
