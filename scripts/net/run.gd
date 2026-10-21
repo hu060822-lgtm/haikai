@@ -1344,15 +1344,18 @@ func local_extracted() -> void:
 	Session.instance.report_finished(payout.total)
 
 
-## The dreamcore map woke this player up: out you go, but half your loot stays in the dream.
+## The dreamcore map woke this player up: out you go, but half your loot stays in the dream
+## (the 保險箱 keeps all of its own).
 func local_woken() -> void:
 	if finished or local_player == null:
 		return
 	var kept: Array[Dictionary] = []
-	var items := local_player.items.duplicate()
-	items.shuffle()
-	for i in items.size() / 2:
-		kept.append(items[i])
+	var loose: Array[Dictionary] = []
+	for item in local_player.items:
+		(kept if item.has("box") else loose).append(item)
+	loose.shuffle()
+	for i in loose.size() / 2:
+		kept.append(loose[i])
 	local_player.items.assign(kept)
 	local_player.message.emit("有人把你叫醒了。你手上的東西少了一半。")
 	local_extracted()
@@ -1362,13 +1365,17 @@ func _on_local_died(cause: String) -> void:
 	if finished:
 		return
 	finished = true
+	# The 保險箱 is paid out as if you got out (its organs go to the stash) ...
+	var box := Organs.split(local_player.take_box_items())
+	var saved := LootTable.payout(box.rest, rng) if not box.rest.is_empty() else {}
+	GameState.record_box(saved.get("total", 0), box.organs)
+	# ... and the backpack spills where you fell, for teammates to pick up.
 	var items := local_player.items.duplicate()
-	# Your backpack spills where you fell, for teammates to pick up.
 	_to_host(&"_spill_body", [items, local_player.global_position])
 	GameState.record_death()
-	local_finished.emit({"survived": false, "items": items, "payout": {}, "cause": cause,
-		"lost_gear": local_player.remaining_gear()})
-	Session.instance.report_finished()
+	local_finished.emit({"survived": false, "items": items, "payout": saved, "cause": cause,
+		"lost_gear": local_player.remaining_gear(), "organs": box.organs})
+	Session.instance.report_finished(saved.get("total", 0))
 
 
 @rpc("any_peer", "call_local", "reliable")

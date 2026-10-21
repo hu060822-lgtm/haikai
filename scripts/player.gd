@@ -104,6 +104,11 @@ var items: Array[Dictionary] = []
 ## This run's backpack: the cells of its random shape (see GridBag). Each item in items
 ## remembers where it sits (data.bag).
 var bag_cells: Array[Vector2i] = []
+## The 保險箱: a fixed 2x3 grid beside the bag. Items in it are still in items, but sit at
+## data.box instead of data.bag. They are paid out even if you die and never stolen.
+var box_cells: Array[Vector2i] = GridBag.box_shape()
+## What the items in the 保險箱 are worth (part of carried_value).
+var box_value := 0
 ## The backpack screen is open (the mouse works the grid, not the gun).
 var bag_open := false
 ## The bulky item in this player's hands (set on every peer by BulkyCarry), or null.
@@ -597,12 +602,14 @@ func remote_warn(text: String, shake := 0.2) -> void:
 	message.emit(text)
 
 
-## Host -> owner: clockwork rats tore something out of the backpack. It drops at your feet.
+## Host -> owner: clockwork rats tore something out of the backpack (never the 保險箱).
+## It drops at your feet.
 @rpc("any_peer", "call_local", "reliable")
 func remote_rob() -> void:
-	if not _from_host() or is_dead or items.is_empty():
+	var loose := bag_indices()
+	if not _from_host() or is_dead or loose.is_empty():
 		return
-	var data: Dictionary = items.pop_at(randi_range(0, items.size() - 1))
+	var data: Dictionary = items.pop_at(loose[randi_range(0, loose.size() - 1)])
 	_recalculate()
 	message.emit("發條鼠從背包叼走了「%s」！" % data.name)
 	var at := global_position + Vector3.UP * 0.3
@@ -934,8 +941,20 @@ func pickup(data: Dictionary) -> bool:
 	return true
 
 
+## G with the bag shut: the last thing put in the backpack (the 保險箱 stays shut).
 func drop_last() -> void:
-	drop_item(items.size() - 1)
+	var loose := bag_indices()
+	if not loose.is_empty():
+		drop_item(loose[-1])
+
+
+## Indices of the items in the backpack proper (not in the 保險箱).
+func bag_indices() -> Array[int]:
+	var result: Array[int] = []
+	for i in items.size():
+		if not items[i].has("box"):
+			result.append(i)
+	return result
 
 
 ## Throws one backpack item on the floor in front of you.
@@ -944,6 +963,7 @@ func drop_item(index: int) -> void:
 		return
 	var data: Dictionary = items.pop_at(index)
 	data.erase("bag")
+	data.erase("box")
 	_recalculate()
 	var at := _camera.global_position - _camera.global_basis.z * 0.8
 	var velocity_out := -_camera.global_basis.z * 2.0
@@ -957,19 +977,40 @@ func drop_item(index: int) -> void:
 
 
 ## Moves a backpack item to another place in the grid (corner at origin, turned `turns`
-## quarter-turns). False, and nothing moves, if it doesn't fit there.
-func bag_move(index: int, origin: Vector2i, turns: int) -> bool:
-	if index < 0 or index >= items.size():
+## quarter-turns), or into the 保險箱 with into_box (and back out without it). False, and
+## nothing moves, if it doesn't fit there.
+func bag_move(index: int, origin: Vector2i, turns: int, into_box := false) -> bool:
+	if index < 0 or index >= items.size() or (into_box and LootTable.is_bulky(items[index])):
 		return false
+	var key := "box" if into_box else "bag"
 	var cells := GridBag.rotated(GridBag.footprint(items[index]), turns)
-	if not GridBag.fits(bag_cells, GridBag.occupancy(items, index), cells, origin):
+	if not GridBag.fits(box_cells if into_box else bag_cells, GridBag.occupancy(items, index, key), cells, origin):
 		return false
-	items[index].bag = Vector3i(origin.x, origin.y, posmod(turns, 4))
+	items[index].erase("bag" if into_box else "box")
+	items[index][key] = Vector3i(origin.x, origin.y, posmod(turns, 4))
 	_recalculate()
 	return true
 
 
-## Empties the backpack and returns what was in it (used by extraction), plus the bulky
+## Puts a backpack item into the first free spot of the 保險箱 (false if it won't go).
+func box_put(index: int) -> bool:
+	if index < 0 or index >= items.size():
+		return false
+	var spot := GridBag.find_spot(box_cells, items, items[index], index, "box")
+	return spot != GridBag.NONE and bag_move(index, Vector2i(spot.x, spot.y), spot.z, true)
+
+
+## Takes the 保險箱's contents out of items (dying: they are paid out, not spilled).
+func take_box_items() -> Array[Dictionary]:
+	var taken: Array[Dictionary] = []
+	for i in range(items.size() - 1, -1, -1):
+		if items[i].has("box"):
+			taken.push_front(items.pop_at(i))
+	_recalculate()
+	return taken
+
+
+## Empties the backpack and the 保險箱 and returns what was in them (used by extraction), plus the bulky
 ## item in your hands and any bulky item set down (not held) inside the extraction pad.
 func take_all_items() -> Array[Dictionary]:
 	var taken: Array[Dictionary] = items.duplicate()
@@ -1644,17 +1685,20 @@ func _update_hot_items(delta: float) -> void:
 func _recalculate() -> void:
 	# Anything that got into the backpack without a place (an old save, a script) gets one.
 	for i in items.size():
-		if not items[i].has("bag"):
+		if not items[i].has("bag") and not items[i].has("box"):
 			var spot := GridBag.find_spot(bag_cells, items, items[i], i)
 			if spot != GridBag.NONE:
 				items[i].bag = spot
 	carried_weight = 0.0
 	carried_value = 0
+	box_value = 0
 	var ids := PackedInt32Array()
 	var tags := PackedStringArray()
 	for item in items:
 		carried_weight += item.weight
 		carried_value += item.value
+		if item.has("box"):
+			box_value += item.value
 		ids.append(item.id)
 		for tag in item.get("tags", []):
 			if not tag in tags:
@@ -1963,7 +2007,7 @@ func _update_item_effects(delta: float) -> void:
 			readout_changed.emit(text)
 
 
-## Living loot wriggles free now and then and drops at your feet.
+## Living loot wriggles free now and then and drops at your feet (the 保險箱 holds it shut).
 func _update_alive_items(delta: float) -> void:
 	if not carries_tag("alive"):
 		return
@@ -1972,7 +2016,7 @@ func _update_alive_items(delta: float) -> void:
 		return
 	_alive_timer = randf_range(ALIVE_INTERVAL.x, ALIVE_INTERVAL.y)
 	for i in range(items.size() - 1, -1, -1):
-		if LootTable.has_tag(items[i], "alive") and randf() < ALIVE_ESCAPE_CHANCE:
+		if LootTable.has_tag(items[i], "alive") and not items[i].has("box") and randf() < ALIVE_ESCAPE_CHANCE:
 			var data: Dictionary = items.pop_at(i)
 			_recalculate()
 			message.emit("「%s」從你手上溜走了！" % data.name)

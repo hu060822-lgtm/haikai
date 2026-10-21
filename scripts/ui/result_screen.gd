@@ -7,9 +7,11 @@ signal continue_requested()
 var survived := false
 var cause := ""
 var items: Array = []
+## On extraction, the whole haul's payout; on death, what the 保險箱 saved (or empty).
 var payout := {}
 var lost_gear: Array = []
-## Organ part ids carried out this run (they went into the stash, not into money).
+## Organ part ids carried out this run, or saved in the 保險箱 on death (they went into
+## the stash, not into money).
 var organs: Array = []
 ## From the session: {extracted, scavengers, squads, squad_totals}.
 var summary := {}
@@ -81,6 +83,8 @@ func _ready() -> void:
 		body.add_child(UiKit.label(cause, 22))
 		var dropped := UiKit.label("背包裡的 %d 件物品都掉在你倒下的地方了。" % items.size(), 17, UiKit.DIM)
 		body.add_child(dropped)
+		if not payout.is_empty() or not organs.is_empty():
+			body.add_child(_box_saved())
 		if not lost_gear.is_empty():
 			var names := []
 			for id in lost_gear:
@@ -113,6 +117,31 @@ func _ready() -> void:
 	tween.tween_property(column, "modulate:a", 1.0, 0.25)
 	tween.parallel().tween_property(column, "scale", Vector2.ONE, 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	column.resized.connect(func() -> void: column.pivot_offset = column.size * 0.5)
+
+
+## Death: what the 保險箱 kept, and the money it still brought in.
+func _box_saved() -> Control:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+	box.add_child(_rule())
+	var names := []
+	for item in payout.get("items_list", []):
+		names.append(str(item.name))
+	for id in organs:
+		names.append(Arsenal.name_of(str(id)))
+	var kept := UiKit.label("保險箱保住了：" + "、".join(names), 17, UiKit.TEXT)
+	kept.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	kept.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	box.add_child(kept)
+	if payout.get("bonus", 0) > 0:
+		box.add_child(_row("湊成一組的獎勵", "+$%d" % payout.bonus, UiKit.HOT, 18))
+	if not payout.is_empty():
+		box.add_child(_row("保險箱賣到", "$%d" % payout.total, UiKit.ACCENT, 26))
+	if not organs.is_empty():
+		var stored := UiKit.label("器官已放進倉庫，可以裝到槍上。", 15, Bestiary.ORGAN)
+		stored.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		box.add_child(stored)
+	return box
 
 
 func _stamp(text: String, color: Color) -> Control:
