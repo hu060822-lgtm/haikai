@@ -3,7 +3,8 @@ extends CanvasLayer
 ## Full-resolution overlay drawn on top of the low-res game view.
 ## Layout: objective + map status top-left, timer and toasts top-centre, prompt and
 ## extraction progress under the crosshair, backpack + vitals bottom-left, gear and
-## usable item (with their keys) bottom-right. Controls show for the first seconds
+## usable item (with their keys) bottom-right, the minimap top-right (M: small / large /
+## hidden) with a compass strip across the top centre. Controls show for the first seconds
 ## of a run and while F1 is held.
 
 const TEXT_COLOR := UiKit.TEXT
@@ -13,8 +14,8 @@ const CONTROLS := [
 	["WASD", "移動"], ["滑鼠", "看"], ["Shift", "衝刺"], ["Ctrl", "蹲下"],
 	["空白", "跳"], ["E", "撿起／互動"], ["G", "丟下"], ["F", "提燈"],
 	["左鍵", "開槍"], ["右鍵", "瞄準"], ["R", "換彈"], ["V", "小刀"],
-	["Q", "強化"], ["X", "用物品"], ["Tab", "背包"], ["M", "麥克風"],
-	["B", "射擊模式"],
+	["Q", "強化"], ["X", "用物品"], ["Tab", "背包"], ["M", "小地圖"],
+	["B", "射擊模式"], ["T", "麥克風"],
 ]
 const HIT_TIME := 0.28
 
@@ -55,6 +56,8 @@ var _timer: Label
 var _timer_panel: PanelContainer
 ## 會醒來的廢墟: the eye under the timer (and its stage banner).
 var awakening_meter: AwakeningMeter
+## The round map top-right and the compass strip over the timer.
+var minimap: Minimap
 var _objective: Label
 var _status: Label
 var _health: ProgressBar
@@ -106,6 +109,7 @@ func _ready() -> void:
 	_build_centre()
 	_build_bottom_left()
 	_build_bottom_right()
+	_build_top_right()
 	_build_help()
 	_ignore_mouse(_root)
 	bag = BagScreen.new()
@@ -147,7 +151,8 @@ func _build_top_centre() -> void:
 	stack.add_theme_constant_override("separation", 10)
 	_root.add_child(stack)
 	stack.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-	stack.offset_top = 14.0
+	# Room above for the compass strip (see Minimap.attach_strip).
+	stack.offset_top = 38.0
 	_timer_panel = _panel(Color(1.0, 1.0, 1.0, 0.25), 4)
 	_timer_panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	(_timer_panel.get_theme_stylebox("panel") as StyleBoxFlat).set_border_width_all(1)
@@ -165,6 +170,16 @@ func _build_top_centre() -> void:
 	_toast.add_child(_message)
 	_toast.visible = false
 	stack.add_child(_toast)
+
+
+func _build_top_right() -> void:
+	minimap = Minimap.new()
+	minimap.anchor_left = 1.0
+	minimap.anchor_right = 1.0
+	_root.add_child(minimap)
+	minimap.set_mode(Minimap.Mode.SMALL)
+	minimap.attach_strip(_root)
+	minimap.set_shown(false)
 
 
 func _build_centre() -> void:
@@ -399,6 +414,7 @@ func _build_help() -> void:
 
 func bind_player(player: Player) -> void:
 	_player = player
+	minimap.player = player
 	player.prompt_changed.connect(_set_prompt)
 	player.stamina_changed.connect(func(ratio: float) -> void: _stamina.value = ratio)
 	player.health_changed.connect(_on_health_changed)
@@ -449,10 +465,10 @@ func set_time_left(seconds: float) -> void:
 func set_voice(state: String) -> void:
 	match state:
 		"speaking":
-			_voice.text = "● 說話中　M 靜音"
+			_voice.text = "● 說話中　T 靜音"
 			_voice.add_theme_color_override("font_color", UiKit.GOOD)
 		"muted":
-			_voice.text = "✕ 麥克風靜音　M 打開"
+			_voice.text = "✕ 麥克風靜音　T 打開"
 			_voice.add_theme_color_override("font_color", UiKit.DANGER)
 		"on":
 			_voice.text = "○ 麥克風開（附近的人和怪物都聽得到）"
@@ -523,6 +539,14 @@ func _process(delta: float) -> void:
 	var pack_box := _pack_panel.get_theme_stylebox("panel") as StyleBoxFlat
 	pack_box.border_color = UiKit.DANGER if fmod(_pack_flash, 0.3) > 0.15 else Color(1.0, 1.0, 1.0, 0.25)
 	pack_box.border_width_left = 4 if _pack_flash > 0.0 else 2
+	# Gone with the bag, once you're dead or out, and while hidden (M).
+	minimap.set_shown(minimap.wanted() and not bag_open)
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("minimap") and not event.is_echo() and not bag_open:
+		minimap.cycle()
+		get_viewport().set_input_as_handled()
 
 
 ## Tab: open or close the backpack grid. The game doesn't pause.
